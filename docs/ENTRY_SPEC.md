@@ -131,58 +131,57 @@ alignment · `ADX(14) > 20`. `VWAP_WINDOW=200`, `MIN_BARS_REQUIRED=210`,
 
 `pairs_arb_scanner.py` · `pairs_prepare_order.py`
 
-**Universe.** Candidate pairs auto-generated from the same ~399-symbol universe:
-a vectorized correlation pre-filter (`|corr| ≥ 0.80` over 250 bars), then a
-from-scratch single-lag Dickey-Fuller cointegration test on the survivors
-(no `statsmodels` in the sandbox). Index-level instruments (SPX/NDX/VIX)
-excluded; index exposure comes via SPY/QQQ/DIA/IWM.
+### Signal — self-contained (LIVE, PR 8 · REVISION 6)
 
-### Signal — two-tier intraday (rebuilt 2026-09-07, PR 4 · REVISION 5)
+The two-tier design (§ below) needs a git push each morning, which the
+scheduled-task container cannot do. The **live path is `--self-contained`**:
+one firing, no state, no git.
 
-Cointegration on 5-minute noise is statistically weak, so it is split in two.
+**Universe.** `pairs_universe.json` — a **curated ~65-symbol list** of
+economically-linked names (sector ETFs, substitutes, same-industry majors,
+index proxies), NOT the 399-symbol liquidity screen. Random names that merely
+correlate over a few hundred bars are usually spurious — a hand-picked menu
+keeps the cointegration test separating signal from noise. Edit the file +
+merge a PR to change the menu (rare); which pairs actually trade is recomputed
+every firing.
 
-**Daily tier — `pairs_daily_tier.py --commit`** — runs once near the open (the
-Market-Open Health Check task). Correlation pre-filter (`|corr| ≥ 0.80`) then
-the single-lag Dickey-Fuller cointegration test on **hourly** bars, requiring
-`≥ 250` aligned bars (`MIN_HOURLY_BARS`). Writes **`pairs_today.json`** — every
-pair with `p < 0.10`, each with a **fixed hedge ratio `β`**, `p`, `|corr|`,
-sorted by `p` — and **commits it to the repo**. Firings share no filesystem, so
-this git commit is the only way the intraday tier gets today's pairs; it reads
-them back with `git show origin/main:pairs_today.json` (task prompt does
-`git fetch origin main` first). No push creds → no pairs traded that day.
+**Each firing** (`scan_pairs_self_contained()`), from ~8 sessions of 5-minute
+bars per symbol:
 
-> The ADF residual now subtracts the OLS intercept (`a − intercept − β·b`), so
-> it is genuinely zero-mean — the "no constant" critical-value table assumes
-> that. Before this fix the test rejected almost nothing.
-
-**Intraday tier — `pairs_arb_scanner.py` → `scan_pairs_intraday()`** — runs
-~every 30 min. `load_pairs_today()` reads the local file, else
-`git show origin/main:pairs_today.json`. For each qualified pair:
-
-1. Spread `= a − β·b` using the day's **fixed** `β` (no re-fit).
-2. Rolling z-score over **`Z_WINDOW_5MIN = 60` × 5-minute bars** (~5 hours),
-   needs `≥ 65` aligned bars.
-3. Enter at **`|z| ≥ 2.0`** — no cointegration re-check.
-   `z ≤ −2` → long A / short B; `z ≥ +2` → short A / long B.
+1. **Correlation pre-filter** — `|corr| ≥ 0.80` over the last `CORR_WINDOW_5MIN
+   = 300` bars.
+2. **Cointegration** — single-lag Dickey-Fuller on the full aligned series,
+   `≥ COINT_MIN_5MIN_BARS = 400` bars, keep `p < 0.10`. On ~8 sessions of 5-min
+   data this tests mean reversion on the hours-to-days horizon — which is the
+   horizon an intraday-exit trade cares about.
+   *(ADF residual subtracts the OLS intercept so it is genuinely zero-mean.)*
+3. **Z-score** — over the last `Z_WINDOW_5MIN = 60` bars, hedge ratio `β`
+   re-fit this firing. Enter at **`|z| ≥ 2.0`**: `z ≤ −2` → long A / short B;
+   `z ≥ +2` → short A / long B.
 4. Two-leg option package, 50/50 budget split, counts as **one** open position.
 
-If `pairs_today.json` is absent, `pairs_arb_scanner.py` falls back to the legacy
-all-in-one hourly scan (`scan_pairs()`), kept for backtests.
-
-**Exit** (see EXIT_SPEC §5.3): target `z → 0`, abandon at `z = ±3.5`, plus the
+**Exit** (EXIT_SPEC §5.3): target `z → 0`, abandon at `z = ±3.5`, plus the
 end-of-day flatten. No per-contract premium stop.
 
 **Parameters**
 
 | name | value |
 |---|---|
-| daily-tier bars | `hour`, `MIN_HOURLY_BARS = 250` |
-| intraday-tier bars | `5min`, `MIN_5MIN_BARS = 65` |
-| `Z_WINDOW_5MIN` | 60 |
-| `Z_ENTRY` | 2.0 |
-| `COINT_P_MAX` | 0.10 (daily tier only) |
-| `CORR_THRESHOLD` | 0.80 (daily tier only) |
-| hedge ratio `β` | fixed for the day, from `pairs_today.json` |
+| universe | `pairs_universe.json` (~65 curated) |
+| bars | `5min`, ~8 sessions deep |
+| `CORR_WINDOW_5MIN` / `CORR_THRESHOLD` | 300 / 0.80 |
+| `COINT_MIN_5MIN_BARS` / `COINT_P_MAX` | 400 / 0.10 |
+| `Z_WINDOW_5MIN` / `Z_ENTRY` | 60 / 2.0 |
+
+<details><summary>Two-tier path (needs push creds — not the live default)</summary>
+
+`pairs_daily_tier.py --commit` runs the correlation + cointegration funnel on
+**hourly** bars (`MIN_HOURLY_BARS = 250`) once near the open, commits
+`pairs_today.json` (qualified pairs + fixed `β`) to the repo;
+`scan_pairs_intraday()` reads it back via `git show origin/main:pairs_today.json`
+and runs the z-score with the fixed `β`. Kept for whenever the task container
+gets push credentials. `scan_pairs()` (all-in-one hourly) remains for backtests.
+</details>
 
 ---
 

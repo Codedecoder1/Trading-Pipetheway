@@ -79,10 +79,22 @@ the intraday tier the 60 bars are 5-minute bars and the hedge ratio is
 fixed by the daily tier; in the legacy path the 60 bars are whatever was
 staged and the hedge ratio is re-fit, gated by cointegration p < 0.10.
 
+REVISION 6 (2026-09-07) -- SELF-CONTAINED path, now the LIVE default. The
+two-tier design (pairs_daily_tier.py -> committed pairs_today.json ->
+intraday tier) needs a git push each morning, which the scheduled-task
+container cannot do. --self-contained instead does everything in ONE
+firing, no state, no git: fetch ~8 sessions of 5-minute bars for the
+CURATED universe (pairs_universe.json, ~65 economically-linked names, not
+the 399-symbol liquidity screen), then correlation -> cointegration on
+that series -> z-score, all in one pass. See scan_pairs_self_contained().
+The two-tier path is kept for anyone who later has push credentials.
+
 Usage:
+  python3 pairs_arb_scanner.py <5min_bars.json> --self-contained [--now-ts ISO8601]
+      -> LIVE default: curated universe, one-pass corr/coint/z-score
   python3 pairs_arb_scanner.py <5min_bars.json> [--now-ts ISO8601]
-      -> intraday tier if pairs_today.json exists, else legacy scan
-  python3 pairs_daily_tier.py <hourly_bars.json>   -> writes pairs_today.json
+      -> two-tier intraday if pairs_today.json is available, else legacy scan
+  python3 pairs_daily_tier.py <hourly_bars.json> --commit   -> two-tier only
 """
 import json, sys, os
 from datetime import datetime, timezone
@@ -116,6 +128,17 @@ MIN_5MIN_BARS = Z_WINDOW_5MIN + 5
 CORR_WINDOW = 250          # bars used for the correlation pre-filter
 CORR_THRESHOLD = 0.80      # |corr| must clear this to earn a full cointegration test
 MAX_CANDIDATE_PAIRS = 400  # cap on pairs that go on to the (expensive) cointegration test
+
+# SELF-CONTAINED path (REVISION 6, 2026-09-07): one firing, no cross-firing
+# state, no git. It fetches ~8 sessions of 5-minute bars for the CURATED
+# universe (pairs_universe.json, ~65 hand-picked economically-linked names --
+# NOT the 399-symbol liquidity screen) and runs correlation -> cointegration ->
+# z-score in a single pass. Cointegration on ~8 sessions of 5-min data tests
+# mean reversion on the hours-to-days horizon -- which is the horizon an
+# intraday-exit strategy actually cares about.
+PAIRS_UNIVERSE_FILE = os.path.join(BACKTEST_DIR, "pairs_universe.json")
+CORR_WINDOW_5MIN = 300         # ~4 sessions of 5-min bars for the correlation pre-filter
+COINT_MIN_5MIN_BARS = 400      # need at least this many aligned 5-min bars for a meaningful ADF
 
 UNIVERSE_FILE = os.path.join(BACKTEST_DIR, "watchlist_universe.json")
 
@@ -196,9 +219,8 @@ def check_pairs_affordability(leg_a_ask, leg_b_ask,
 
 
 def load_universe(path: str = UNIVERSE_FILE, fallback=None) -> list:
-    """Same live scan-generated universe as vwap_dmi_screener.py's
-    load_universe() -- both strategies draw candidates from one shared,
-    dynamically-generated pool rather than each keeping its own hand list."""
+    """The wide liquidity-screened universe (watchlist_universe.json, ~399
+    names) -- used by the legacy all-in-one scan and the daily tier."""
     try:
         with open(path) as f:
             data = json.load(f)
@@ -209,6 +231,20 @@ def load_universe(path: str = UNIVERSE_FILE, fallback=None) -> list:
         pass
     fb = fallback if fallback is not None else FALLBACK_WATCHLIST_PAIRS
     return sorted({sym for pair in fb for sym in pair})
+
+
+def load_pairs_universe(path: str = PAIRS_UNIVERSE_FILE) -> list:
+    """The CURATED pairs universe (pairs_universe.json, ~65 hand-picked
+    economically-linked names) -- used by the self-contained path. Falls
+    back to the symbols in FALLBACK_WATCHLIST_PAIRS if the file is missing."""
+    try:
+        with open(path) as f:
+            syms = json.load(f).get("symbols", [])
+        if syms:
+            return sorted(set(syms))
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return sorted({sym for pair in FALLBACK_WATCHLIST_PAIRS for sym in pair})
 
 # Asymptotic Dickey-Fuller critical values, "no constant" case (Fuller 1976 /
 # MacKinnon 1994 quantiles), used to interpolate an approximate p-value from
@@ -410,7 +446,8 @@ def _pairs_today_from_git():
     for ref in ("origin/main", "origin/HEAD", "HEAD"):
         try:
             out = subprocess.run(["git", "-C", here, "show", f"{ref}:pairs_today.json"],
-                                 capture_output=True, text=True, timeout=20)
+                                 capture_output=True, text=True, timeout=10,
+                                 stdin=subprocess.DEVNULL)
             if out.returncode == 0 and out.stdout.strip():
                 payload = json.loads(out.stdout)
                 if payload.get("pairs") is not None:
@@ -504,6 +541,76 @@ def scan_pairs_intraday(bars_by_symbol: dict, pairs_today: dict, now_ts: str = N
     return proposals
 
 
+def scan_pairs_self_contained(bars_by_symbol: dict, now_ts: str = None,
+                               buying_power: float = None, universe: list = None) -> list:
+    """SELF-CONTAINED path (REVISION 6). One firing, no cross-firing state,
+    no git. Everything from ~8 sessions of 5-minute bars for the curated
+    universe:
+      1. correlation pre-filter over the last CORR_WINDOW_5MIN bars
+      2. cointegration (check_cointegration) on the FULL aligned series,
+         requiring >= COINT_MIN_5MIN_BARS bars
+      3. z-score over the last Z_WINDOW_5MIN bars, hedge ratio re-fit here
+      4. entry at |z| >= Z_ENTRY for a pair that cleared p < COINT_P_MAX
+
+    bars_by_symbol: {symbol: [5-minute bar dicts]} -- deep (>= ~600 bars).
+    """
+    universe = universe or load_pairs_universe()
+    universe = [s for s in universe if s in bars_by_symbol]
+    candidates = discover_candidate_pairs(
+        bars_by_symbol, universe, now_ts=now_ts, corr_window=CORR_WINDOW_5MIN)
+
+    proposals = []
+    for ticker_a, ticker_b in candidates:
+        sa = _load_series(bars_by_symbol, ticker_a, now_ts)
+        sb = _load_series(bars_by_symbol, ticker_b, now_ts)
+        df = pd.concat([sa, sb], axis=1, join="inner").dropna()
+        if len(df) < COINT_MIN_5MIN_BARS:
+            continue
+        series_a, series_b = df[ticker_a], df[ticker_b]
+
+        p_value, hedge_ratio, adf_t = check_cointegration(series_a.values, series_b.values)
+        if p_value >= COINT_P_MAX:
+            continue
+
+        z_scores, hr, _ = calculate_zscore(series_a, series_b, window=Z_WINDOW_5MIN)
+        current_z = z_scores.iloc[-1]
+        if pd.isna(current_z):
+            continue
+
+        signal = None
+        if current_z <= -Z_ENTRY:
+            signal = {"strategy": "PAIRS_STAT_ARB_MEAN_REVERSION",
+                      "pair": f"{ticker_a}/{ticker_b}", "direction": "LONG_A_SHORT_B",
+                      "leg_1_call_candidate": ticker_a, "leg_2_put_candidate": ticker_b}
+        elif current_z >= Z_ENTRY:
+            signal = {"strategy": "PAIRS_STAT_ARB_MEAN_REVERSION",
+                      "pair": f"{ticker_a}/{ticker_b}", "direction": "SHORT_A_LONG_B",
+                      "leg_1_put_candidate": ticker_a, "leg_2_call_candidate": ticker_b}
+        if not signal:
+            continue
+
+        signal.update({
+            "checked_at_utc": datetime.now(timezone.utc).isoformat(),
+            "tier": "self_contained_5min",
+            "as_of_bar": str(df.index[-1]),
+            "z_score": round(float(current_z), 2),
+            "z_window_bars": Z_WINDOW_5MIN,
+            "coint_bars_used": int(len(df)),
+            "hedge_ratio": round(float(hr), 4),
+            "hedge_ratio_source": "re-fit this firing",
+            "adf_p_value_approx": round(float(p_value), 4),
+            "adf_t_stat": round(float(adf_t), 3),
+            "price_a": round(float(series_a.iloc[-1]), 2),
+            "price_b": round(float(series_b.iloc[-1]), 2),
+            "target_exit": "Z_SCORE = 0.0",
+            "stop_loss": "Z_SCORE = +/-3.5",
+        })
+        if buying_power is not None:
+            signal["allocation_per_leg_reference"] = round((buying_power * 0.85) / 2, 2)
+        proposals.append(signal)
+    return proposals
+
+
 def log_hits(hits):
     if not hits:
         return
@@ -522,9 +629,19 @@ if __name__ == "__main__":
     with open(bars_path) as f:
         bars_by_symbol = json.load(f)
 
-    pairs_today = load_pairs_today()
+    self_contained = "--self-contained" in sys.argv
+    pairs_today = None if self_contained else load_pairs_today()
 
-    if pairs_today is not None:
+    if self_contained:
+        uni = load_pairs_universe()
+        have = [s for s in uni if s in bars_by_symbol]
+        print(f"=== Pairs StatArb -- SELF-CONTAINED @ {datetime.now(timezone.utc).isoformat()} "
+              f"(as-of {now_ts or 'latest available'}) ===")
+        print(f"Curated universe: {len(uni)} symbols ({len(have)} with staged bars). "
+              f"corr>={CORR_THRESHOLD} over {CORR_WINDOW_5MIN} bars -> cointegration "
+              f"p<{COINT_P_MAX} over >={COINT_MIN_5MIN_BARS} 5-min bars -> |z|>={Z_ENTRY}\n")
+        hits = scan_pairs_self_contained(bars_by_symbol, now_ts=now_ts)
+    elif pairs_today is not None:
         print(f"=== Pairs StatArb -- INTRADAY TIER @ {datetime.now(timezone.utc).isoformat()} "
               f"(as-of {now_ts or 'latest available'}) ===")
         print(f"pairs_today.json: session {pairs_today.get('session_date')}, "

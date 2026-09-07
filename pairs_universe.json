@@ -1,0 +1,21 @@
+{
+  "note": "Curated candidate universe for the SELF-CONTAINED Pairs strategy (pairs_arb_scanner.py --self-contained). Hand-picked names that move together for a real economic reason -- sector ETFs, substitutes, index proxies, same-industry majors -- so the cointegration test is separating signal from noise, not fishing 80,000 random combinations. Edit this list and merge a PR to add/drop a name (rarely needed). Which pairs are actually traded is recomputed every firing from recent price history; this file only sets the menu.",
+  "updated": "2026-09-07",
+  "symbols": [
+    "SPY", "QQQ", "IWM", "DIA", "RSP", "VTI",
+    "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE", "XLC",
+    "SMH", "SOXX", "NVDA", "AMD", "AVGO", "INTC", "MU", "QCOM", "TXN",
+    "XOM", "CVX", "COP", "SLB", "OXY",
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META",
+    "V", "MA", "PYPL",
+    "HD", "LOW", "WMT", "TGT", "COST",
+    "JPM", "BAC", "WFC", "C", "GS", "MS",
+    "F", "GM",
+    "DAL", "UAL", "AAL", "LUV",
+    "GLD", "GDX", "NEM", "SLV",
+    "T", "VZ",
+    "KO", "PEP",
+    "TLT", "IEF",
+    "FXI", "EEM", "EWZ"
+  ]
+}

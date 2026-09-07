@@ -182,7 +182,8 @@ checkout, which the task container may or may not be (see
 | **4** | Pairs rebuilt — daily cointegration tier writes `pairs_today.json`, intraday 5-min z-score trigger reads it (ENTRY_SPEC §3) | ✅ merged (#5) |
 | **5** | `exit_manager.py` + new scheduled task — §5 rules, notify-and-confirm, 5-min cadence, all three strategies | ✅ merged (#6) |
 | **6** | Reporting — `RESULTS.md` (win/loss/P&L vs Robinhood realized P&L) committed back to the repo each close | ✅ merged (#7) |
-| **7** | **Stateless / no-shared-filesystem rework** — `exit_manager.py` drops all state files and reconstructs phase/dedup from broker orders; entry proposal becomes a 3-order **bracket**; `pairs_today.json` committed to the repo for the cross-firing handoff; `trade_log` demoted to per-firing, `reporting.py` on Robinhood only | ✅ this PR |
+| **7** | **Stateless / no-shared-filesystem rework** — `exit_manager.py` drops all state files and reconstructs phase/dedup from broker orders; entry proposal becomes a 3-order **bracket**; `trade_log` demoted to per-firing, `reporting.py` on Robinhood only | ✅ merged (#8) |
+| **8** | **Pairs self-contained** — git push doesn't work from the task container, so Pairs runs `--self-contained` (one firing, curated `pairs_universe.json`, correlation→cointegration→z-score on ~8 sessions of 5-min bars). Two-tier kept for later. `RESULTS.md` committed from an interactive session only. | ✅ this PR |
 
 Task-side (Chat, not this repo), in parallel: signal tasks → **15 min** cadence
 (confirmed 2026-09-07); SMC task fetches 5-min bars; re-pin each task's commit

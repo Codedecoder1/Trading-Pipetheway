@@ -26,9 +26,9 @@ tasks to the new merge commit. **Never touch the STANDING RULE** (no
 | Pairs Stat-Arb Signal Monitor `:30` | `30 13-18 * * 1-5` | sibling |
 | Exit Monitor `:00` | `0 14-20 * * 1-5` | + 1 sibling at `:30` |
 | Exit Monitor `:30` | `30 13-19 * * 1-5` | sibling |
-| Daily Market-Open Health Check | `32 13 * * 1-5` | also runs `pairs_daily_tier.py --commit` |
+| Daily Market-Open Health Check | `32 13 * * 1-5` | unchanged (Pairs is self-contained now — no daily-tier step) |
 | 10:05am Progress Recap | `5 17 * * 1-5` | unchanged |
-| Market-Close Daily Summary | `5 20 * * 1-5` | also runs `reporting.py` |
+| Market-Close Daily Summary | `5 20 * * 1-5` | also runs `reporting.py` (embed scorecard in the notification) |
 
 **2 signal siblings, not 4; 2 Exit Monitor siblings, not 12.** The bracket
 (below) puts the fast exits at the broker, so 30-minute cadence is enough.
@@ -62,25 +62,27 @@ then `python3 vwap_dmi_screener.py`. **Not hourly** — hourly input breaks it.
 
 Verify its `get_equity_historicals` call uses `"5minute"`.
 
-### E. Pairs — two tiers, handed off through git
+### E. Pairs — self-contained, one task, no git, no daily step
 
-**E1. `Daily Market-Open Health Check` task** — add:
+Git push doesn't work from the task container, so Pairs runs `--self-contained`:
+one firing does everything. **No Market-Open step, no `pairs_today.json`, no
+cross-firing state.**
 
-> Stage **hourly** bars (`interval="hour"`, ≥250/symbol) for the
-> `watchlist_universe.json` symbols into `pairs_hourly_bars.json`
-> (`{symbol:[{close_price,begins_at,...},...]}`). Run
-> `git fetch origin main` then
-> `python3 pairs_daily_tier.py pairs_hourly_bars.json --commit`. It computes
-> the day's cointegrated pairs and **commits `pairs_today.json` to the repo**.
-> Report how many qualified. (If the commit fails — no push creds — say so;
-> the intraday tier then has nothing and trades no pairs that day.)
+**`Pairs Stat-Arb Signal Monitor` task** (×2 siblings, `:00` / `:30`), prompt:
 
-**E2. `Pairs Stat-Arb Signal Monitor` task** — the prompt must start with
-`git fetch origin main` (so `git show origin/main:pairs_today.json` inside
-`pairs_arb_scanner.py` sees today's file). Then stage **5-minute** bars for the
-symbols in `pairs_today.json` (≥65/symbol) into `pairs_5min_bars.json` and run
-`python3 pairs_arb_scanner.py pairs_5min_bars.json`. Then the existing
-`resolve_pairs_leg.py` ×2 → `pairs_prepare_order.py` path.
+> Read `pairs_universe.json` from the repo (~65 curated symbols). Stage
+> **5-minute** bars (`interval="5minute"`) for those symbols, **~8 sessions
+> deep** (≥ ~450 bars/symbol), into `pairs_5min_bars.json` as
+> `{symbol:[{close_price,begins_at,...},...]}`. Run
+> `python3 pairs_arb_scanner.py pairs_5min_bars.json --self-contained`. On a
+> hit, continue into the existing `resolve_pairs_leg.py` ×2 →
+> `pairs_prepare_order.py` path.
+
+~65 symbols × one deep 5-min fetch = a handful of batched `get_equity_historicals`
+calls per firing. The scanner runs the correlation → cointegration → z-score
+funnel itself each time; a pair that decouples drops out automatically.
+
+To change the candidate list: edit `pairs_universe.json`, merge a PR, re-pin.
 
 ### F. NEW TASK — `Exit Monitor` (×2 siblings, `:00` / `:30`)
 
@@ -114,13 +116,13 @@ After the recap, build inputs from Robinhood (`get_realized_pnl` spans →
 run `python3 reporting.py --now-utc <ISO> --realized-json '…' --closed-trades-json '…' --account-json '…'`,
 and put the printed scorecard into the summary notification.
 
-**Push creds question** (still open): if this task's container can push to
-`Codedecoder1/Trading-Pipetheway`, add `--commit` (and to E1's
-`pairs_daily_tier.py` call). If not: `pairs_today.json` handoff **won't work**
-from the task — the daily tier would need to run from an interactive checkout
-each morning instead — and `RESULTS.md` gets committed from an interactive
-session. **Confirm this first; it determines whether the Pairs strategy can run
-unattended at all.**
+**Push creds:** the task container **cannot push** (2026-09-07 test — a
+diagnostic push produced no branch on the repo). Consequences:
+- Pairs: solved — it's `--self-contained` now (§E), no git needed.
+- `RESULTS.md` on GitHub: the Market-Close task can't commit it. Either read
+  the scorecard from the notification and skip GitHub, or run
+  `python3 reporting.py --commit` from an interactive checkout after the close.
+  (The scorecard in the notification is the same content.)
 
 ---
 

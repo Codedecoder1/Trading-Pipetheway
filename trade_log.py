@@ -42,6 +42,8 @@ EVENT_TYPES = {
     "order_expired",         # live_expire_stale_orders.py: an awaiting_confirmation order aged out (>15 min)
     "order_confirmed_executed",  # live_execute_order.py: user confirmed, place_option_order was actually called
     "position_closed",       # live_log_position_closed.py: a position was closed (stop hit or manual), realized P&L known
+    "exit_proposed",         # exit_manager.py: an open position hit an exit rule -- a close proposal was written to pending_exits.json
+    "exit_expired",          # exit_manager.py: an awaiting_confirmation exit proposal aged out
 }
 
 

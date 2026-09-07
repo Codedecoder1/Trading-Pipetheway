@@ -3,8 +3,8 @@
 Single source of truth for **how a position should be closed**. This is the
 document to argue with before we build `exit_manager.py`.
 
-Status: current through the "risk dials" PR (2026-09-07). §5
-(`exit_manager.py`) is still to build — that is PR 5.
+Status: current through PR 5 (2026-09-07) — `exit_manager.py` is in code.
+Next: the reporting PR (`RESULTS.md`, PR 6).
 
 ---
 
@@ -107,48 +107,52 @@ same-day scalps. What changes for the 2-week-cushion version:
 A new scheduled task, firing **every 5 minutes during market hours**. Same
 discipline as entries: it **proposes** closes, it does not place them.
 
-### 5.1 Each cycle
+Built as **`exit_manager.py`** (PR 5) — a pure evaluator, no tool access, same
+discipline as `live_prepare_order.py`.
+
+### 5.1 Each cycle (the orchestrating task)
 
 1. Pull open option positions (`get_option_positions`) and their live quotes
-   (`get_option_quotes`), plus today's realized P&L (`get_realized_pnl`).
-2. Reconcile against `pending_live_orders.json` / `trade_log.jsonl` — know the
-   entry price, entry time, and current planned stop for each position.
-3. For each position, evaluate the exit rules (§5.2) and, if one triggers,
-   write a **close proposal** to a `pending_exits.json` queue + notify.
-4. Never propose the same close twice while one is awaiting confirmation.
+   (`get_option_quotes`); check open orders for a resting stop per position.
+2. For a swing-thesis check (rules 3–4), re-run the entry detector on the
+   underlying's recent candles and pass `thesis_broken` / `underlying_consolidating`.
+3. Pass all of it to `exit_manager.py --positions-json ... --now-utc ...
+   --session-close-utc ...`. It reconciles against `exit_state.json` (phase +
+   post-TP1 peak) and `pending_exits.json` (the queue), evaluates the rules,
+   writes any new close proposals, and prints tickets.
+4. A position with an `awaiting_confirmation` proposal is not re-proposed
+   unless a **higher-priority** rule now fires (then the old one is superseded).
+   Stale proposals (> 45 min) are expired at the start of each run.
 
-### 5.2 Exit rules — intraday, same-day close (▶ all PENDING review)
+### 5.2 Exit rules — intraday, same-day close (`exit_manager.py`)
 
-Evaluated every 5 min against the live option premium and the underlying.
+Evaluated every 5 min; **first match wins**, priority = table order. The
+"close 100%" protective rules rank above the partial take-profit on purpose.
 
 | # | rule | trigger | action |
 |---|---|---|---|
-| 1 | **Hard stop** | premium ≤ entry − **10%** | close 100%. Should also be a resting GTC stop-market placed at entry; the manager alerts if it's missing. |
-| 2 | **End-of-day flatten** | **15 min before session close**, still open | close 100%, unconditionally. This is the "same day" guarantee. |
-| 3 | **Take-profit 1** | premium ≥ entry + **30%** | close **50%**, move stop on the rest to breakeven (entry). |
-| 4 | **Runner trailing stop** | after TP1: premium falls **20%** off its highest point since TP1 | close remainder |
-| 5 | **Dead-trade time stop** | ~**90 min** in trade and premium within **±8%** of entry | close 100% — capital isn't working, free it up |
-| 6 | **Thesis break** | SMC: opposite POC-retest fires · VWAP/DMI: close crosses back through the VWAP-200 against the position | close 100% |
-| 7 | **Consolidation stop** | 3 consecutive 10-min underlying candles inside a ±0.25% band | close 100% |
+| 1 | **Hard stop** | mark ≤ entry − **10%** (`HARD_STOP_PCT`) | close 100%; flags `NO RESTING STOP FOUND` if one isn't already placed |
+| 2 | **End-of-day flatten** | within **15 min** (`EOD_FLATTEN_MIN`) of the session close, still open | close 100%, unconditionally — the "same day" guarantee |
+| 3 | **Thesis break** | orchestrator sets `thesis_broken` (SMC opposite POC-retest · VWAP/DMI recrosses session VWAP against the position) | close 100% |
+| 4 | **Consolidation** | orchestrator sets `underlying_consolidating` (3× 10-min candles inside ±0.25%) | close 100% |
+| 5 | **Take-profit 1** | mark ≥ entry + **30%** (`TAKE_PROFIT_PCT`), pre-runner | close **50%** (whole 1-lot), move to runner phase, move stop on the rest to breakeven |
+| 6 | **Runner trailing stop** | runner phase, mark ≤ **20%** (`RUNNER_TRAIL_PCT`) off its peak since TP1 | close remainder |
+| 7 | **Dead-trade time stop** | ≥ **90 min** (`DEAD_TRADE_MIN`) in trade and \|P&L\| ≤ **8%** (`DEAD_TRADE_BAND`), pre-runner | close 100% — capital idle |
 
-No overnight holds, ever — rule 2 covers the case where nothing else fired.
+### 5.3 Pairs exits — `exit_manager.py → evaluate_pairs_exits()`
 
-### 5.3 Pairs exits (separate path)
-
-Re-check the pair's live z-score each cycle:
-- `|z| ≤ 0.1` → propose closing both legs (target hit).
-- `|z| ≥ 3.5` → propose closing both legs (abandon).
-- **End-of-day flatten** (rule 2 above) applies to the package too — close both
-  legs 15 min before the close if still open.
+Orchestrator passes each open package's live `current_z`:
+- `|z| ≤ 0.1` (`Z_EXIT_TARGET`) → close both legs (target hit)
+- `|z| ≥ 3.5` (`Z_EXIT_ABANDON`) → close both legs (abandon)
+- EOD flatten applies to the package too
 
 No premium stop on the package.
 
 ### 5.4 Logging
 
-Every evaluation writes a line to `trade_log.jsonl`
-(`event: "exit_evaluated"` / `"exit_proposed"` / `"position_closed"`), and a
-generated `RESULTS.md` (see the reporting PR) is committed back to the repo so
-the record is visible on GitHub, not just in the task's cloud workspace.
+`exit_manager.py` appends `exit_proposed` / `exit_expired` events to
+`trade_log.jsonl`. The reporting PR (6) generates `RESULTS.md` from the full
+log + Robinhood's realized P&L and commits it back to the repo.
 
 ---
 
@@ -159,9 +163,9 @@ the record is visible on GitHub, not just in the task's cloud workspace.
 | **1** | `docs/ENTRY_SPEC.md` + `docs/EXIT_SPEC.md` | ✅ merged (#2) |
 | **2** | Risk dials + cutoff: hard stop `0.15→0.10`, loss guardrail `0.60→0.10`, drawdown `0.15→0.08`, `EXECUTION_CUTOFF 20:00→19:00`, take-profit ticket (+30%) added to proposals | ✅ merged (#3) |
 | **3** | `vwap_dmi_screener.py` rebuilt — 5-min bars, session-anchored VWAP, warm-up seed (ENTRY_SPEC §2) | ✅ merged (#4) |
-| **4** | Pairs rebuilt — daily cointegration tier writes `pairs_today.json`, intraday 5-min z-score trigger reads it (ENTRY_SPEC §3) | ✅ this PR |
-| **5** | `exit_manager.py` + new scheduled task — §5 rules, notify-and-confirm, 5-min cadence, all three strategies | next |
-| **6** | Reporting — `RESULTS.md` (win/loss/P&L vs Robinhood realized P&L) committed back to the repo each close | last |
+| **4** | Pairs rebuilt — daily cointegration tier writes `pairs_today.json`, intraday 5-min z-score trigger reads it (ENTRY_SPEC §3) | ✅ merged (#5) |
+| **5** | `exit_manager.py` + new scheduled task — §5 rules, notify-and-confirm, 5-min cadence, all three strategies | ✅ this PR |
+| **6** | Reporting — `RESULTS.md` (win/loss/P&L vs Robinhood realized P&L) committed back to the repo each close | next |
 
 Task-side (Chat, not this repo), in parallel: signal tasks → **15 min** cadence
 (confirmed 2026-09-07); SMC task fetches 5-min bars; re-pin each task's commit

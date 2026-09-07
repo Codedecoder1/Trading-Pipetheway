@@ -57,11 +57,32 @@ statsmodels.tsa.stattools.coint():
     exhaustive test for hourly-bar spreads over a ~60-90 session window.
     This is disclosed here rather than silently claimed to be textbook-exact.
 
-Entry rule (unchanged from the user's original logic): |z-score| >= 2.0 on
-a 60-bar rolling window of the OLS-hedge-ratio spread, gated by the
-cointegration test at approx p < 0.10.
+REVISION 5 (2026-09-07, INTRADAY REBUILD, per explicit user request) --
+this scanner is now the INTRADAY TIER of a two-tier design (see
+docs/ENTRY_SPEC.md section 3 and pairs_daily_tier.py):
 
-Usage: python3 pairs_arb_scanner.py <hourly_bars.json> [--now-ts ISO8601]
+  * pairs_daily_tier.py runs ONCE near the open: correlation + cointegration
+    on HOURLY bars over ~60-90 sessions -> writes pairs_today.json with the
+    day's qualified pairs, each with a FIXED hedge ratio.
+  * this file, run every 15 min, reads pairs_today.json and checks each
+    pair's rolling z-score over 60 x 5-MINUTE bars using that fixed hedge
+    ratio (calculate_zscore(..., hedge_ratio=beta)). Entry at |z| >= 2.0.
+    No cointegration re-check -- the daily tier already did it.
+    See scan_pairs_intraday().
+
+The legacy all-in-one path (discover_candidate_pairs + scan_pairs, both on
+one hourly dataset) is kept for backtests and as the fallback when
+pairs_today.json is absent.
+
+Entry rule: |z-score| >= 2.0 on a 60-bar rolling window of the spread. In
+the intraday tier the 60 bars are 5-minute bars and the hedge ratio is
+fixed by the daily tier; in the legacy path the 60 bars are whatever was
+staged and the hedge ratio is re-fit, gated by cointegration p < 0.10.
+
+Usage:
+  python3 pairs_arb_scanner.py <5min_bars.json> [--now-ts ISO8601]
+      -> intraday tier if pairs_today.json exists, else legacy scan
+  python3 pairs_daily_tier.py <hourly_bars.json>   -> writes pairs_today.json
 """
 import json, sys, os
 from datetime import datetime, timezone
@@ -83,6 +104,13 @@ FALLBACK_WATCHLIST_PAIRS = [
 Z_WINDOW = 60
 Z_ENTRY = 2.0
 COINT_P_MAX = 0.10
+
+# INTRADAY REBUILD (2026-09-07): the intraday tier reads the day's qualified
+# pairs + fixed hedge ratios from here (written by pairs_daily_tier.py).
+PAIRS_TODAY_FILE = os.path.join(BACKTEST_DIR, "pairs_today.json")
+# Intraday-tier z-score runs on 5-minute bars; 60 bars ~= 5 hours.
+Z_WINDOW_5MIN = 60
+MIN_5MIN_BARS = Z_WINDOW_5MIN + 5
 
 # Auto-discovery of candidate pairs from a wide universe (REVISION 2).
 CORR_WINDOW = 250          # bars used for the correlation pre-filter
@@ -211,11 +239,21 @@ def _approx_adf_pvalue(t_stat: float) -> float:
 
 def check_cointegration(series_a: np.ndarray, series_b: np.ndarray):
     """OLS hedge ratio + single-lag Dickey-Fuller test on the residual
-    spread. Returns (p_value_approx, hedge_ratio, adf_t_stat)."""
+    spread. Returns (p_value_approx, hedge_ratio, adf_t_stat).
+
+    FIX (2026-09-07): the ADF residual now subtracts the OLS INTERCEPT too
+    (`series_a - intercept - hedge_ratio * series_b`), so it is genuinely
+    zero-mean -- which is the assumption the "no constant" DF critical-value
+    table below relies on. Before this fix the residual still carried the
+    intercept (a non-zero level), which biased gamma_hat toward zero and
+    made check_cointegration reject almost nothing (a stationary AR(1)
+    spread with phi=0.6 scored p~0.41). calculate_zscore is unaffected --
+    its rolling mean removes any level regardless.
+    """
     X = np.column_stack([np.ones(len(series_b)), series_b])
     beta, *_ = np.linalg.lstsq(X, series_a, rcond=None)
     intercept, hedge_ratio = beta[0], beta[1]
-    spread = series_a - hedge_ratio * series_b
+    spread = series_a - intercept - hedge_ratio * series_b
 
     y = spread
     y_lag = y[:-1]
@@ -235,15 +273,23 @@ def check_cointegration(series_a: np.ndarray, series_b: np.ndarray):
     return p_value, float(hedge_ratio), float(t_stat)
 
 
-def calculate_zscore(series_a: pd.Series, series_b: pd.Series, window: int = Z_WINDOW):
-    X = np.column_stack([np.ones(len(series_b)), series_b.values])
-    beta, *_ = np.linalg.lstsq(X, series_a.values, rcond=None)
-    hedge_ratio = float(beta[1])
+def calculate_zscore(series_a: pd.Series, series_b: pd.Series, window: int = Z_WINDOW,
+                      hedge_ratio: float = None):
+    """Rolling z-score of the spread (series_a - hedge_ratio * series_b).
+
+    hedge_ratio: if given (INTRADAY TIER -- the fixed beta from
+    pairs_today.json), it is used as-is. If None (legacy all-in-one path),
+    beta is re-fit by OLS on the supplied window.
+    """
+    if hedge_ratio is None:
+        X = np.column_stack([np.ones(len(series_b)), series_b.values])
+        beta, *_ = np.linalg.lstsq(X, series_a.values, rcond=None)
+        hedge_ratio = float(beta[1])
     spread = series_a - hedge_ratio * series_b
     rolling_mean = spread.rolling(window=window).mean()
     rolling_std = spread.rolling(window=window).std()
     z_score = (spread - rolling_mean) / rolling_std
-    return z_score, hedge_ratio, float(spread.iloc[-1])
+    return z_score, float(hedge_ratio), float(spread.iloc[-1])
 
 
 def _load_series(bars_by_symbol: dict, symbol: str, now_ts: str = None) -> pd.Series:
@@ -353,6 +399,89 @@ def scan_pairs(bars_by_symbol: dict, now_ts: str = None, buying_power: float = N
     return proposals
 
 
+def load_pairs_today(path: str = PAIRS_TODAY_FILE):
+    """Reads pairs_today.json (written by pairs_daily_tier.py). Returns the
+    parsed payload, or None if the file is missing/empty/corrupt -- the
+    caller then falls back to the legacy all-in-one scan_pairs()."""
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+        if payload.get("pairs"):
+            return payload
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def scan_pairs_intraday(bars_by_symbol: dict, pairs_today: dict, now_ts: str = None,
+                         buying_power: float = None) -> list:
+    """INTRADAY TIER. For each pair the daily tier qualified this morning,
+    compute the spread with that pair's FIXED hedge ratio and a rolling
+    z-score over Z_WINDOW_5MIN 5-minute bars, and trigger an entry at
+    |z| >= Z_ENTRY. No cointegration re-check here -- the pair already
+    cleared p < COINT_P_MAX in pairs_daily_tier.py.
+
+    bars_by_symbol: {symbol: [5-minute bar dicts]}.
+    """
+    proposals = []
+    for entry in pairs_today.get("pairs", []):
+        ticker_a, ticker_b = entry["ticker_a"], entry["ticker_b"]
+        beta = float(entry["hedge_ratio"])
+
+        sa = _load_series(bars_by_symbol, ticker_a, now_ts)
+        sb = _load_series(bars_by_symbol, ticker_b, now_ts)
+        df = pd.concat([sa, sb], axis=1, join="inner").dropna()
+        if len(df) < MIN_5MIN_BARS:
+            continue
+        series_a, series_b = df[ticker_a], df[ticker_b]
+
+        z_scores, _, current_spread = calculate_zscore(
+            series_a, series_b, window=Z_WINDOW_5MIN, hedge_ratio=beta)
+        current_z = z_scores.iloc[-1]
+        if pd.isna(current_z):
+            continue
+
+        signal = None
+        if current_z <= -Z_ENTRY:
+            signal = {
+                "strategy": "PAIRS_STAT_ARB_MEAN_REVERSION",
+                "pair": f"{ticker_a}/{ticker_b}",
+                "direction": "LONG_A_SHORT_B",
+                "leg_1_call_candidate": ticker_a,
+                "leg_2_put_candidate": ticker_b,
+            }
+        elif current_z >= Z_ENTRY:
+            signal = {
+                "strategy": "PAIRS_STAT_ARB_MEAN_REVERSION",
+                "pair": f"{ticker_a}/{ticker_b}",
+                "direction": "SHORT_A_LONG_B",
+                "leg_1_put_candidate": ticker_a,
+                "leg_2_call_candidate": ticker_b,
+            }
+        if not signal:
+            continue
+
+        signal.update({
+            "checked_at_utc": datetime.now(timezone.utc).isoformat(),
+            "tier": "intraday_5min",
+            "as_of_bar": str(df.index[-1]),
+            "z_score": round(float(current_z), 2),
+            "z_window_bars": Z_WINDOW_5MIN,
+            "hedge_ratio": round(beta, 4),
+            "hedge_ratio_source": "pairs_today.json daily tier",
+            "adf_p_value_approx": entry.get("adf_p_value"),
+            "session_date": pairs_today.get("session_date"),
+            "price_a": round(float(series_a.iloc[-1]), 2),
+            "price_b": round(float(series_b.iloc[-1]), 2),
+            "target_exit": "Z_SCORE = 0.0",
+            "stop_loss": "Z_SCORE = +/-3.5",
+        })
+        if buying_power is not None:
+            signal["allocation_per_leg_reference"] = round((buying_power * 0.85) / 2, 2)
+        proposals.append(signal)
+    return proposals
+
+
 def log_hits(hits):
     if not hits:
         return
@@ -362,7 +491,8 @@ def log_hits(hits):
 
 
 if __name__ == "__main__":
-    bars_path = sys.argv[1] if len(sys.argv) > 1 else "pairs_hourly_bars.json"
+    bars_path = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") \
+        else "pairs_5min_bars.json"
     now_ts = None
     if "--now-ts" in sys.argv:
         now_ts = sys.argv[sys.argv.index("--now-ts") + 1]
@@ -370,26 +500,34 @@ if __name__ == "__main__":
     with open(bars_path) as f:
         bars_by_symbol = json.load(f)
 
-    universe = load_universe()
-    universe = [s for s in universe if s in bars_by_symbol] or list(bars_by_symbol.keys())
+    pairs_today = load_pairs_today()
 
-    print(f"=== Pairs StatArb Scanner @ {datetime.now(timezone.utc).isoformat()} "
-          f"(as-of {now_ts or 'latest available'}) ===")
-    print(f"Universe: {len(universe)} symbols (live scan-generated, see watchlist_universe.json)")
+    if pairs_today is not None:
+        print(f"=== Pairs StatArb -- INTRADAY TIER @ {datetime.now(timezone.utc).isoformat()} "
+              f"(as-of {now_ts or 'latest available'}) ===")
+        print(f"pairs_today.json: session {pairs_today.get('session_date')}, "
+              f"{len(pairs_today['pairs'])} qualified pair(s), "
+              f"z-window={Z_WINDOW_5MIN} x 5-min bars, entry |z|>={Z_ENTRY}\n")
+        hits = scan_pairs_intraday(bars_by_symbol, pairs_today, now_ts=now_ts)
+    else:
+        universe = load_universe()
+        universe = [s for s in universe if s in bars_by_symbol] or list(bars_by_symbol.keys())
+        print(f"=== Pairs StatArb -- LEGACY all-in-one (no pairs_today.json) @ "
+              f"{datetime.now(timezone.utc).isoformat()} (as-of {now_ts or 'latest available'}) ===")
+        print(f"Universe: {len(universe)} symbols")
+        candidate_pairs = discover_candidate_pairs(bars_by_symbol, universe, now_ts=now_ts) \
+            if len(universe) > 20 else FALLBACK_WATCHLIST_PAIRS
+        print(f"Correlation pre-filter (window={CORR_WINDOW}, |corr|>={CORR_THRESHOLD}): "
+              f"{len(candidate_pairs)} candidate pair(s)")
+        print(f"z-window={Z_WINDOW}, entry |z|>={Z_ENTRY}, cointegration approx-p<{COINT_P_MAX}\n")
+        hits = scan_pairs(bars_by_symbol, now_ts=now_ts, pairs=candidate_pairs)
 
-    candidate_pairs = discover_candidate_pairs(bars_by_symbol, universe, now_ts=now_ts) \
-        if len(universe) > 20 else FALLBACK_WATCHLIST_PAIRS
-    print(f"Correlation pre-filter (window={CORR_WINDOW}, |corr|>={CORR_THRESHOLD}): "
-          f"{len(candidate_pairs)} candidate pair(s) advance to cointegration test")
-    print(f"z-window={Z_WINDOW}, entry |z|>={Z_ENTRY}, cointegration approx-p<{COINT_P_MAX}\n")
-
-    hits = scan_pairs(bars_by_symbol, now_ts=now_ts, pairs=candidate_pairs)
     log_hits(hits)
 
     if hits:
         print(f"*** {len(hits)} qualifying pair signal(s) ***")
         print(json.dumps(hits, indent=2))
     else:
-        print("No pairs currently exceed the |Z| >= 2.0 threshold with sufficient cointegration.")
+        print("No pairs currently exceed the |Z| >= 2.0 threshold.")
 
     print("\nSIGNAL-ONLY -- no order-placement tool was called or is reachable from this script.")

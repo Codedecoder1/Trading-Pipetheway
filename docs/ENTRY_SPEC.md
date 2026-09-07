@@ -3,9 +3,9 @@
 Single source of truth for **when the pipeline proposes a trade**. If the code
 and this document disagree, that is a bug in one of them — say so in the PR.
 
-Status: current through PR 3 (2026-09-07) — Conservative dials, noon cutoff, and
-the VWAP/DMI intraday rebuild are in code. Still `▶ INTRADAY REBUILD` (to build):
-the Pairs minute-bar rebuild in §3.
+Status: current through PR 4 (2026-09-07) — Conservative dials, noon cutoff, and
+the VWAP/DMI + Pairs intraday rebuilds are all in code. Next: `exit_manager.py`
+(PR 5).
 
 Nothing in this pipeline places an order. Every path below ends at a **written
 proposal + notification**, and a human confirms and places the trade.
@@ -136,46 +136,48 @@ from-scratch single-lag Dickey-Fuller cointegration test on the survivors
 (no `statsmodels` in the sandbox). Index-level instruments (SPX/NDX/VIX)
 excluded; index exposure comes via SPY/QQQ/DIA/IWM.
 
-### ▶ INTRADAY REBUILD (agreed 2026-09-07 — to build)
+### Signal — two-tier intraday (rebuilt 2026-09-07, PR 4 · REVISION 5)
 
-Cointegration on 5-minute noise is statistically weak, so split it in two:
+Cointegration on 5-minute noise is statistically weak, so it is split in two.
 
-**Daily tier — pick the pairs (slow).** Once per day (piggy-back on the
-Market-Open Health Check), run the correlation pre-filter + Dickey-Fuller
-cointegration on **hourly** bars over ~60–90 sessions. Output: the day's list of
-tradeable pairs, each with its hedge ratio `β` and cointegration `p`. Written to
-a `pairs_today.json` the intraday tier reads. Cointegration keeps its longer
-horizon — only the *entry trigger* moves intraday.
+**Daily tier — `pairs_daily_tier.py`** — runs once near the open (the
+Market-Open Health Check task). Correlation pre-filter (`|corr| ≥ 0.80`) then
+the single-lag Dickey-Fuller cointegration test on **hourly** bars, requiring
+`≥ 250` aligned bars (`MIN_HOURLY_BARS`). Writes **`pairs_today.json`**: every
+pair with `p < 0.10`, each with a **fixed hedge ratio `β`**, its `p`, and its
+`|corr|`, sorted by `p`.
 
-**Intraday tier — trigger the entry (fast).** Every 15–30 min, for each pair in
-`pairs_today.json`:
+> The ADF residual now subtracts the OLS intercept (`a − intercept − β·b`), so
+> it is genuinely zero-mean — the "no constant" critical-value table assumes
+> that. Before this fix the test rejected almost nothing.
 
-1. Spread `= a − β·b` using the day's fixed `β`.
-2. Rolling z-score over **60 × 5-minute bars** (~5 hours).
-3. Enter when **`|z| ≥ 2.0`** (the pair already cleared `p < 0.10` in the daily
-   tier). `z ≤ −2` → long A / short B; `z ≥ +2` → short A / long B.
+**Intraday tier — `pairs_arb_scanner.py` → `scan_pairs_intraday()`** — runs
+every 15 min. Reads `pairs_today.json`; for each qualified pair:
+
+1. Spread `= a − β·b` using the day's **fixed** `β` (no re-fit).
+2. Rolling z-score over **`Z_WINDOW_5MIN = 60` × 5-minute bars** (~5 hours),
+   needs `≥ 65` aligned bars.
+3. Enter at **`|z| ≥ 2.0`** — no cointegration re-check.
+   `z ≤ −2` → long A / short B; `z ≥ +2` → short A / long B.
 4. Two-leg option package, 50/50 budget split, counts as **one** open position.
+
+If `pairs_today.json` is absent, `pairs_arb_scanner.py` falls back to the legacy
+all-in-one hourly scan (`scan_pairs()`), kept for backtests.
 
 **Exit** (see EXIT_SPEC §5.3): target `z → 0`, abandon at `z = ±3.5`, plus the
 end-of-day flatten. No per-contract premium stop.
 
-**Parameters (proposed)**
+**Parameters**
 
 | name | value |
 |---|---|
-| daily-tier bars | `hour`, ~60–90 sessions |
-| intraday-tier bars | `5min` |
-| `Z_WINDOW` | 60 (5-min bars) |
+| daily-tier bars | `hour`, `MIN_HOURLY_BARS = 250` |
+| intraday-tier bars | `5min`, `MIN_5MIN_BARS = 65` |
+| `Z_WINDOW_5MIN` | 60 |
 | `Z_ENTRY` | 2.0 |
-| `COINT_P_MAX` | 0.10 (daily tier) |
-| `CORR_THRESHOLD` | 0.80 (daily tier) |
-| hedge ratio `β` | fixed for the day, from the daily tier |
-
-<details><summary>Previous (all-hourly) signal — for reference</summary>
-
-OLS hedge ratio + 60-*hourly*-bar z-score, cointegration `p < 0.10`, entry
-`|z| ≥ 2.0`. `Z_WINDOW=60`, `CORR_THRESHOLD=0.80`.
-</details>
+| `COINT_P_MAX` | 0.10 (daily tier only) |
+| `CORR_THRESHOLD` | 0.80 (daily tier only) |
+| hedge ratio `β` | fixed for the day, from `pairs_today.json` |
 
 ---
 

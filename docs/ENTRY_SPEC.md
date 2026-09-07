@@ -80,26 +80,48 @@ live universe file is missing.
 scanner backend caps near 400). Falls back to a fixed 24-symbol list if the file
 is missing.
 
-**Signal** — all three must hold on the **latest hourly bar**:
+### ▶ INTRADAY REBUILD (agreed 2026-09-07 — to build)
 
-1. **VWAP-200 cross.** Close crosses the rolling 200-bar VWAP relative to the
-   previous bar. Up-cross → bullish; down-cross → bearish.
-2. **DMI alignment.** `+DI > −DI` for a bullish cross; `−DI > +DI` for bearish.
-   (14-period, Wilder-smoothed.)
-3. **Trend strength.** `ADX(14) > 20`.
+The current signal is hourly-bar machinery: a 200-*hour* VWAP is ~30 trading
+days of context, which is a swing-trend filter, not an intraday one. Rebuild:
 
-**Reference levels** computed and reported, **not enforced** (see EXIT_SPEC):
-`stop_distance = 2.5 × ATR(14)` · `stop = close ∓ stop_distance` ·
-`target = close ± 3 × stop_distance`.
+**Bars.** 5-minute. Fetch the **prior session + today** so `ADX`/`ATR` are warm
+at the open; VWAP uses **today only**.
 
-**Parameters**
+**VWAP.** Switch from a 200-bar rolling VWAP to a **session-anchored VWAP** that
+resets each day at the 13:30 UTC open — the standard intraday reference.
+
+**Signal** — all three on the latest *closed* 5-minute bar:
+
+1. **Session-VWAP cross.** Close crosses the session VWAP vs the previous 5-min
+   bar. Up → bullish (call); down → bearish (put).
+2. **DMI alignment.** `+DI > −DI` (bull) / `−DI > +DI` (bear), 14-period on
+   5-min bars.
+3. **Trend strength.** `ADX(14) > 20` on 5-min bars.
+
+**Reference levels** (still informational): `stop_distance = 1.5 × ATR(14, 5-min)`
+— tighter than the old 2.5×, intraday — `target = 2 × stop_distance`.
+
+**Warm-up.** `ADX(14)` needs ~20 5-min bars. Seeding from the prior session's
+last ~40 bars lets signals fire from the open instead of ~9:00 AM PT.
+
+**Parameters (proposed)**
 
 | name | value |
 |---|---|
-| `VWAP_WINDOW` | 200 bars |
+| bar interval | `5min` |
+| `VWAP_ANCHOR` | session open (13:30 UTC) |
 | `DMI_ADX_LENGTH` | 14 |
 | `ADX_MIN` | 20.0 |
-| `MIN_BARS_REQUIRED` | 210 |
+| `ATR_STOP_MULT` | 1.5 |
+| warm-up seed | prior session, ~40 bars |
+
+<details><summary>Previous (hourly / swing) signal — for reference</summary>
+
+All three on the latest **hourly** bar: 200-bar rolling VWAP cross · `+DI/−DI`
+alignment · `ADX(14) > 20`. `VWAP_WINDOW=200`, `MIN_BARS_REQUIRED=210`,
+`stop = 2.5×ATR`, `target = 3× that`.
+</details>
 
 ---
 
@@ -113,27 +135,46 @@ from-scratch single-lag Dickey-Fuller cointegration test on the survivors
 (no `statsmodels` in the sandbox). Index-level instruments (SPX/NDX/VIX)
 excluded; index exposure comes via SPY/QQQ/DIA/IWM.
 
-**Signal**
+### ▶ INTRADAY REBUILD (agreed 2026-09-07 — to build)
 
-1. OLS hedge ratio `a ~ const + β·b`; spread `= a − β·b`.
-2. Rolling z-score of the spread over a **60-bar** window.
-3. Entry when **`|z| ≥ 2.0`** *and* cointegration `p < 0.10`.
-   - `z ≤ −2.0` → long leg A / short leg B.
-   - `z ≥ +2.0` → short leg A / long leg B.
-4. Built as a **two-leg option package**, budget split 50/50 across legs,
-   counts as **one** open position.
+Cointegration on 5-minute noise is statistically weak, so split it in two:
 
-**Exit is defined here, not in exit_engine**: target `z = 0.0`, abandon at
-`z = ±3.5`. No per-contract premium stop on a pairs package.
+**Daily tier — pick the pairs (slow).** Once per day (piggy-back on the
+Market-Open Health Check), run the correlation pre-filter + Dickey-Fuller
+cointegration on **hourly** bars over ~60–90 sessions. Output: the day's list of
+tradeable pairs, each with its hedge ratio `β` and cointegration `p`. Written to
+a `pairs_today.json` the intraday tier reads. Cointegration keeps its longer
+horizon — only the *entry trigger* moves intraday.
 
-**Parameters**
+**Intraday tier — trigger the entry (fast).** Every 15–30 min, for each pair in
+`pairs_today.json`:
+
+1. Spread `= a − β·b` using the day's fixed `β`.
+2. Rolling z-score over **60 × 5-minute bars** (~5 hours).
+3. Enter when **`|z| ≥ 2.0`** (the pair already cleared `p < 0.10` in the daily
+   tier). `z ≤ −2` → long A / short B; `z ≥ +2` → short A / long B.
+4. Two-leg option package, 50/50 budget split, counts as **one** open position.
+
+**Exit** (see EXIT_SPEC §5.3): target `z → 0`, abandon at `z = ±3.5`, plus the
+end-of-day flatten. No per-contract premium stop.
+
+**Parameters (proposed)**
 
 | name | value |
 |---|---|
-| `Z_WINDOW` | 60 |
+| daily-tier bars | `hour`, ~60–90 sessions |
+| intraday-tier bars | `5min` |
+| `Z_WINDOW` | 60 (5-min bars) |
 | `Z_ENTRY` | 2.0 |
-| `COINT_P_MAX` | 0.10 |
-| `CORR_THRESHOLD` | 0.80 |
+| `COINT_P_MAX` | 0.10 (daily tier) |
+| `CORR_THRESHOLD` | 0.80 (daily tier) |
+| hedge ratio `β` | fixed for the day, from the daily tier |
+
+<details><summary>Previous (all-hourly) signal — for reference</summary>
+
+OLS hedge ratio + 60-*hourly*-bar z-score, cointegration `p < 0.10`, entry
+`|z| ≥ 2.0`. `Z_WINDOW=60`, `CORR_THRESHOLD=0.80`.
+</details>
 
 ---
 
@@ -157,11 +198,11 @@ reaches a fraction of day-start buying power.
 Signal timestamp ≤ `EXECUTION_CUTOFF` (**20:00 UTC** as of REVISION 11).
 A later signal is logged `signal_only_not_executed` — no proposal.
 
-▶ **PENDING — needs a decision.** REVISION 11 raised this to 20:00 (session
-close) *because* positions were going to be 2-week holds. Now that every trade
-is exited the same day, a signal at 19:55 UTC has ~5 minutes of runway before
-the close — not enough to manage a target/stop exit. Recommend dropping it back
-to **19:00 UTC (12:00 PT)** so there is at least an hour to work the exit.
+▶ **DECIDED 2026-09-07: drop back to `19:00:00 UTC` (12:00 PM PT).** REVISION 11
+raised it to the session close only for the swing model. With same-day exits, a
+signal needs runway before the close to work a target/stop, so no new entries
+after noon Pacific. (`SESSION_TIME_CUTOFF` stays at 20:00 — a signal after noon
+is still *logged*, just not traded.)
 
 ### 4.4 Expiration — `select_expiration.py`
 First listed expiration **10–45 calendar days** out (`MIN_DTE = 10`,
@@ -200,26 +241,16 @@ Notification sent. Expires unconfirmed after **45 min**
 
 ## 5. Open questions for review
 
-Now that all three strategies are intraday (agreed 2026-09-07), these need
-answers before the exit-manager and task-prompt changes:
+**Decided 2026-09-07:**
+- Execution cutoff → **19:00 UTC / noon PT** (§4.3).
+- **VWAP/DMI and Pairs rebuilt around minute bars** — designs in §2 and §3 above.
 
-1. **Execution cutoff** — drop `EXECUTION_CUTOFF` back to 19:00 UTC? (§4.3)
-2. **Task cadence** — all three signal tasks should fire every **15–30 min**
-   during market hours, not hourly. The SMC runbook says "every 30 min"; the
-   live task list shows hourly. Set all three to 15 or 30 min. (Task-side change,
-   Chat interface — not this repo.)
-3. **SMC bars** — `dry_run_check.py` already expects **5-minute** bars
-   (resampled to 5/10/30). Confirm the SMC task's `get_equity_historicals` call
-   requests 5-minute bars, not hourly (hourly input silently breaks the 10/30
-   resample).
-4. **VWAP/DMI bar basis** — the screener uses a **200-bar hourly** VWAP
-   (~30 trading days of context) and `ADX(14)` hourly. For an intraday trade,
-   is that still the signal you want, or should it move to intraday bars
-   (e.g. session-anchored VWAP + 5-min ADX)? This is a strategy-design call,
-   not a config tweak.
-5. **Pairs bar basis** — the scanner runs cointegration + a 60-bar z-score on
-   **hourly** bars over ~60–90 sessions. Intraday pairs trading would use minute
-   bars over a shorter window — a different statistical setup. Keep hourly, or
-   redesign?
-6. **Schedule (days).** Code comments say SMC = Mon/Tue/Thu/Fri, VWAP/DMI = Wed
+**Still task-side (Chat interface, not this repo) — please confirm:**
+
+1. **Task cadence** — all three signal tasks fire every **15–30 min** during
+   market hours, not hourly. Runbook says SMC = "every 30 min"; task list shows
+   hourly. Pick 15 or 30.
+2. **SMC bars** — confirm the SMC task's `get_equity_historicals` call requests
+   **5-minute** bars (hourly input silently breaks the 10/30-min resample).
+3. **Schedule (days).** Code comments say SMC = Mon/Tue/Thu/Fri, VWAP/DMI = Wed
    only, Pairs = Thu; the live tasks appear to run all three every day. Confirm.

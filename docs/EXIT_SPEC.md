@@ -156,14 +156,14 @@ the record is visible on GitHub, not just in the task's cloud workspace.
 
 ## 6. Build order
 
-1. **This spec** — confirm the §5.2 rules and numbers (hard stop −10%, TP1 +30%
-   / half, runner trail 20%, dead-trade 90 min / ±8%, EOD flatten −15 min).
-2. **Risk-dial PR** — the `▶ PENDING` constants in §1–2 and ENTRY_SPEC §4.2/4.6,
-   plus `EXECUTION_CUTOFF` → 19:00 UTC (ENTRY_SPEC §4.3).
-3. **`exit_manager.py` + its scheduled task** — §5, notify-and-confirm, 5-min
-   cadence. Applies to all three strategies now.
-4. **Task-prompt changes** (Chat side, not this repo) — signal tasks fire every
-   15–30 min; confirm SMC fetches 5-min bars; decide VWAP/DMI + Pairs bar basis
-   (ENTRY_SPEC §5.4–5.5).
-5. **Reporting PR** — `RESULTS.md`, win/loss/P&L vs Robinhood realized P&L,
-   committed back to the repo so it's visible on GitHub.
+| PR | contents | status |
+|---|---|---|
+| **1** | `docs/ENTRY_SPEC.md` + `docs/EXIT_SPEC.md` | this branch — review |
+| **2** | Risk dials + cutoff: hard stop `0.15→0.10`, loss guardrail `0.60→0.10`, drawdown `0.15→0.08`, `EXECUTION_CUTOFF 20:00→19:00`, take-profit ticket (+30% / half) added to proposals | next |
+| **3** | `vwap_dmi_screener.py` rebuilt — 5-min bars, session-anchored VWAP, warm-up seed (ENTRY_SPEC §2) | after 2 |
+| **4** | Pairs rebuilt — daily cointegration tier writes `pairs_today.json`, intraday 5-min z-score trigger reads it (ENTRY_SPEC §3) | after 2 |
+| **5** | `exit_manager.py` + new scheduled task — §5 rules, notify-and-confirm, 5-min cadence, all three strategies | after 3–4 |
+| **6** | Reporting — `RESULTS.md` (win/loss/P&L vs Robinhood realized P&L) committed back to the repo each close | last |
+
+Task-side (Chat, not this repo), in parallel: signal tasks → 15–30 min cadence;
+SMC task fetches 5-min bars; re-pin each task's commit after every merge.

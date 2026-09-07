@@ -392,15 +392,16 @@ SESSION_TIME_CUTOFF = "20:00:00"  # REVISION 8: reject signals firing after this
                                # whether a detected signal is automatically executed; that's a
                                # separate, tighter gate -- see EXECUTION_CUTOFF /
                                # check_execution_time() below.
-EXECUTION_CUTOFF = "20:00:00"  # REVISION 11 (2026-09-06), per explicit user request: raised from
-                               # 19:30:00 to 20:00:00 UTC (== SESSION_TIME_CUTOFF), i.e. any signal
-                               # that Layer 1 logs can now also be auto-prepared. REVISION 10's
-                               # rationale below was "no same-day option data left to manage a
-                               # same-day exit" -- that assumed intraday scalps. The user is moving
-                               # to ~2-week expirations (see select_expiration.py) managed by a
-                               # hard stop-loss, not a same-day close, so a late-session entry no
-                               # longer needs same-day data to be manageable. Revert to 19:30:00
-                               # if the strategy goes back to same-day exits.
+EXECUTION_CUTOFF = "19:00:00"  # REVISION 12 (2026-09-07), per explicit user request: 20:00:00 ->
+                               # 19:00:00 UTC (12:00 PM PT). REVISION 11 had raised it to the
+                               # session close for a ~2-week swing hold; the strategy is now
+                               # intraday again -- enter on a minute-bar signal, take profit or
+                               # stop out the SAME session (the 10-45 DTE expiration is only a
+                               # theta/pin cushion, not a holding period). A same-day exit needs
+                               # runway before the 20:00 close to work a target/stop, so no new
+                               # entries after noon Pacific. SESSION_TIME_CUTOFF stays at 20:00 --
+                               # a later signal is still LOGGED, just not traded.
+                               # --- REVISION 11 (2026-09-06): raised 19:30 -> 20:00 for the swing model (now superseded).
                                # --- REVISION 10 (2026-08-27), retained for context: the $150-account Monday-Wednesday
                                # simulation (see diag/backtest/ dollar-simulation findings,
                                # 2026-08-26) showed that a signal firing on the session's last

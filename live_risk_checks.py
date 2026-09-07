@@ -142,14 +142,27 @@ percentage of live buying power (scales with the account, no fixed dollar
 number to go stale). MAX_PREMIUM_PER_CONTRACT (the static fallback for
 callers without a live buying_power figure) updated to match at today's
 account size: 168.12 * 0.85 = ~$142.90.
+
+REVISION 8 (2026-09-07), "Conservative dials", per explicit user request --
+tighten loss control now that every trade is intraday (same-day exit):
+  - HARD_STOP_PCT           0.15  -> 0.10  (planned stop-market trigger)
+  - get_max_daily_drawdown  0.15  -> 0.08  of total equity
+  - pnl_guardrail.check_daily_loss_guardrail max_loss_pct 0.60 -> 0.10
+    (that constant lives in pnl_guardrail.py, changed there in the same PR)
+  - DAILY_DRAWDOWN_CAP static fallback -21.00 -> -16.81 (8% of ~$210 equity)
+  - new: TAKE_PROFIT_PCT 0.30 / TAKE_PROFIT_FRACTION 0.5 + compute_take_profit_price(),
+    so every proposal can carry a "sell half at +30%" limit ticket alongside
+    the stop (see live_prepare_order.py).
+The per-trade budget (85%) is unchanged -- that is a sizing choice, not a
+loss control, and the user confirmed it separately.
 """
 
 MAX_PREMIUM_PER_CONTRACT = 142.90
 MIN_PREMIUM_TOTAL = 15.00
 MAX_SPREAD_PCT = 0.10
 MAX_OPEN_POSITIONS = 5
-DAILY_DRAWDOWN_CAP = -21.00
-HARD_STOP_PCT = 0.15
+DAILY_DRAWDOWN_CAP = -16.81       # static fallback; live path uses get_max_daily_drawdown() (8% of equity)
+HARD_STOP_PCT = 0.10             # 2026-09-07 Conservative dials: -15% -> -10% planned hard stop
 
 VIX_HIGH_VOL_THRESHOLD = 25.0
 REGIME_HIGH_VOL_SIZE_MULTIPLIER = 0.5  # halve the contract budget when VIX > threshold
@@ -185,7 +198,7 @@ def get_max_contract_budget(buying_power: float, vix: float = None) -> float:
     return budget
 
 def get_max_daily_drawdown(total_equity: float) -> float:
-    return total_equity * 0.15  # 15% risk cap per session
+    return total_equity * 0.08  # 2026-09-07 Conservative dials: 15% -> 8% risk cap per session
 
 
 def check_affordability(ask_price, max_premium=MAX_PREMIUM_PER_CONTRACT):
@@ -235,6 +248,16 @@ def check_daily_drawdown(today_pnl_dollars, cap=DAILY_DRAWDOWN_CAP):
 def compute_hard_stop_price(ask_price, hard_stop_pct=HARD_STOP_PCT):
     """Sell-to-close stop_market trigger price, rounded to the cent."""
     return round(ask_price * (1 - hard_stop_pct), 2)
+
+
+TAKE_PROFIT_PCT = 0.30      # 2026-09-07: book the first partial at entry +30%
+TAKE_PROFIT_FRACTION = 0.5  # ...selling half the position
+
+
+def compute_take_profit_price(ask_price, take_profit_pct=TAKE_PROFIT_PCT):
+    """Sell-to-close limit price for the first take-profit, rounded to the cent.
+    Pairs with TAKE_PROFIT_FRACTION (sell half here, keep half as a runner)."""
+    return round(ask_price * (1 + take_profit_pct), 2)
 
 
 def run_all_checks(ask_price, bid_price, open_position_count, today_pnl_dollars,

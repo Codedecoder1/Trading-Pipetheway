@@ -3,9 +3,9 @@
 Single source of truth for **when the pipeline proposes a trade**. If the code
 and this document disagree, that is a bug in one of them — say so in the PR.
 
-Status: describes the pipeline as of commit `c22641c` (2026-09-07), plus the
-"Conservative" risk changes agreed 2026-09-07 (marked ▶ PENDING — not in code
-yet, landing in a separate PR).
+Status: current through the "risk dials" PR (2026-09-07) — Conservative dials
+and the noon cutoff are in code. Still `▶ INTRADAY REBUILD` (to build): the
+VWAP/DMI and Pairs minute-bar rebuilds in §2 and §3.
 
 Nothing in this pipeline places an order. Every path below ends at a **written
 proposal + notification**, and a human confirms and places the trade.
@@ -190,9 +190,9 @@ OLS hedge ratio + 60-*hourly*-bar z-score, cointegration `p < 0.10`, entry
 Halt **all new** trades for the rest of the day once today's realized loss
 reaches a fraction of day-start buying power.
 
-| | current | ▶ PENDING (Conservative) |
-|---|---|---|
-| `max_loss_pct` | **0.60** | **0.10** |
+| | value |
+|---|---|
+| `max_loss_pct` | **0.10** (was 0.60 — changed in PR "risk dials", 2026-09-07) |
 
 ### 4.3 Execution cutoff — `contract_filters.check_execution_time`
 Signal timestamp ≤ `EXECUTION_CUTOFF` (**20:00 UTC** as of REVISION 11).
@@ -218,14 +218,14 @@ Forced-OTM path is disabled (`SMALL_ACCOUNT_PRICE_THRESHOLD = 1000`).
 
 ### 4.6 Risk gate — `live_risk_checks.run_all_checks` — **all must pass**
 
-| check | current | ▶ PENDING (Conservative) |
-|---|---|---|
-| Affordability | `cost ≤ 85% of buying power` | unchanged |
-| Premium floor | `cost ≥ $15` | unchanged |
-| Spread | `≤ 10% of ask` | unchanged |
-| Position cap | `open positions < 5` | unchanged |
-| Daily drawdown | `today P&L > −15% of equity` | **`> −8% of equity`** |
-| VIX regime | `VIX > 25 → budget × 0.5` | unchanged |
+| check | rule |
+|---|---|
+| Affordability | `cost ≤ 85% of buying power` |
+| Premium floor | `cost ≥ $15` |
+| Spread | `≤ 10% of ask` |
+| Position cap | `open positions < 5` |
+| Daily drawdown | `today P&L > −8% of equity` (was −15% — changed 2026-09-07) |
+| VIX regime | `VIX > 25 → budget × 0.5` |
 
 ### 4.7 Simulate — `review_option_order`
 Prices the ticket, surfaces broker alerts. **Never submits.** Result is attached

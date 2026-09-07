@@ -19,11 +19,18 @@ the position exits on a 3% trailing stop on premium, OR a POC-reversal
 signal on the underlying, whichever triggers first. No hard floor, no
 partial profit-taking, no time limit.
 
+NOTE (2026-09-07, Conservative dials): the default hard_stop_pct is now 0.10
+(was 0.15) and tp1_pct is 0.30 (was 0.25), matching live_risk_checks.py
+REVISION 8. The "-15%" / "+25%" figures in the prose below are the ORIGINAL
+design values, kept for context -- the parameter defaults are what actually
+run. The live exit path (exit_manager.py, forthcoming) and EXIT_SPEC.md are
+the source of truth for the intraday same-day exit rules.
+
 Hybrid strategy structure (simulate_hybrid_trade_exit):
   Phase 1 (entry -> TP1):
-    - Hard stop -15% on premium, active from entry, highest priority.
+    - Hard stop (default -10%) on premium, active from entry, highest priority.
     - Active trailing stop 6%, off the highest premium seen since entry.
-    - Take-profit-1 target +25% -> closes 50% of the ORIGINAL position size,
+    - Take-profit-1 (default +30%) -> closes 50% of the ORIGINAL position size,
       moves the remainder into phase 2.
   Phase 2 (runner, only after TP1 fires):
     - Active trailing stop 12%, off the highest premium seen since TP1.
@@ -237,8 +244,8 @@ def time_decay_exit(underlying_df, entry_time, max_consolidation_candles=3,
 
 
 def simulate_hybrid_trade_exit(option_bars, underlying_df, entry_time, entry_price, direction,
-                                hard_stop_pct=0.15, trail_pct_phase1=0.06,
-                                tp1_pct=0.25, tp1_fraction=0.5, trail_pct_phase2=0.12,
+                                hard_stop_pct=0.10, trail_pct_phase1=0.06,
+                                tp1_pct=0.30, tp1_fraction=0.5, trail_pct_phase2=0.12,
                                 max_consolidation_candles=3, consolidation_range_pct=0.005,
                                 max_time_in_trade_minutes=30):
     """

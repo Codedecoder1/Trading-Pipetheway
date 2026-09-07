@@ -51,9 +51,28 @@ resamples nothing and expects 5-minute input.
 Confirm the SMC task's `get_equity_historicals` call requests `"5minute"`, not
 hourly. If it's hourly, the 10/30-min resample produces garbage.
 
-### E. Pairs task — two-tier — ☐ TODO (needed for PR 4, not yet built)
+### E. Pairs task — two-tier — ☐ TODO (needed for PR 4)
 
-Will be filled in when PR 4 lands.
+**E1. Daily tier — add to the `Daily Market-Open Health Check` task prompt:**
+
+> Once, near the open: stage **hourly** bars (`interval="hour"`) for the
+> `watchlist_universe.json` symbols, ~250+ bars each (≈ 60–90 sessions), into
+> `pairs_hourly_bars.json` as `{symbol: [ {close_price, begins_at, ...}, ... ]}`.
+> Run `python3 pairs_daily_tier.py pairs_hourly_bars.json`. It writes
+> `pairs_today.json` (the day's cointegrated pairs + fixed hedge ratios). Report
+> how many pairs qualified.
+
+**E2. Intraday tier — the `Pairs Stat-Arb Signal Monitor` task prompt:**
+
+> Every 15 min: stage **5-minute** bars (`interval="5minute"`) for just the
+> symbols named in `pairs_today.json` (last ~5–6 hours, ≥ 65 bars each) into
+> `pairs_5min_bars.json`, same shape. Run
+> `python3 pairs_arb_scanner.py pairs_5min_bars.json`. If `pairs_today.json` is
+> missing (daily tier hasn't run), the scanner logs that and does nothing —
+> that's expected before the open.
+
+Then continue into the existing `resolve_pairs_leg.py` × 2 → `pairs_prepare_order.py`
+package-proposal path unchanged.
 
 ---
 

@@ -1,18 +1,18 @@
 # Exit Specification
 
-Single source of truth for **how a position should be closed**. This is the
-document to argue with before we build `exit_manager.py`.
+Single source of truth for **how a position should be closed**.
 
-Status: current through PR 5 (2026-09-07) — `exit_manager.py` is in code.
-Next: the reporting PR (`RESULTS.md`, PR 6).
+Status: **the intraday rebuild is complete** (PRs 1–6, 2026-09-07). Exits are
+managed live by `exit_manager.py` (notify-and-confirm); `reporting.py` produces
+`RESULTS.md`.
 
 ---
 
 ## 1. What actually happens today
 
-**Exits are not managed by the pipeline yet** (that is PR 5, `exit_manager.py`).
-As of the "risk dials" PR (2026-09-07), every proposal notification prints two
-*planned* tickets the human places by hand after the entry fills:
+Every **entry** proposal notification prints two *planned* tickets the human
+places by hand after the fill (`exit_manager.py`, §5, then watches the position
+live and proposes the actual close):
 
 | ticket | type | trigger / limit | TIF |
 |---|---|---|---|
@@ -22,8 +22,9 @@ As of the "risk dials" PR (2026-09-07), every proposal notification prints two
 `compute_hard_stop_price()` / `compute_take_profit_price()` compute the numbers
 (`HARD_STOP_PCT = 0.10`, `TAKE_PROFIT_PCT = 0.30`). On a ≥2-lot the take-profit
 sells half and keeps a runner; on a 1-lot it closes the whole position. Nothing
-places or watches these until PR 5 — if you do not place the stop yourself, the
-position has no protection.
+places these automatically — if you do not place the stop yourself, the
+position has no protection until `exit_manager.py`'s next 5-minute pass catches
+it and proposes the close.
 
 ---
 
@@ -102,13 +103,12 @@ same-day scalps. What changes for the 2-week-cushion version:
 
 ---
 
-## 5. Proposed spec for `exit_manager.py` (to build — notify-and-confirm)
+## 5. `exit_manager.py` — the live exit tier
 
-A new scheduled task, firing **every 5 minutes during market hours**. Same
-discipline as entries: it **proposes** closes, it does not place them.
-
-Built as **`exit_manager.py`** (PR 5) — a pure evaluator, no tool access, same
-discipline as `live_prepare_order.py`.
+The **Exit Monitor** scheduled task fires **every 5 minutes during market
+hours**. `exit_manager.py` is a pure evaluator, no tool access, same discipline
+as `live_prepare_order.py`: it **proposes** closes to `pending_exits.json`, it
+does not place them.
 
 ### 5.1 Each cycle (the orchestrating task)
 
@@ -148,11 +148,18 @@ Orchestrator passes each open package's live `current_z`:
 
 No premium stop on the package.
 
-### 5.4 Logging
+### 5.4 Logging & reporting
 
 `exit_manager.py` appends `exit_proposed` / `exit_expired` events to
-`trade_log.jsonl`. The reporting PR (6) generates `RESULTS.md` from the full
-log + Robinhood's realized P&L and commits it back to the repo.
+`trade_log.jsonl`. Two renderers turn the log into docs:
+
+- **`render_trade_log.py` → `TRADE_LOG.md`** — the raw event feed, newest first.
+- **`reporting.py` → `RESULTS.md`** (PR 6) — the scorecard: realized P&L by
+  window (from Robinhood's `get_realized_pnl`), win rate, a recent-trade ledger,
+  the account snapshot, and a reconciliation line (trade-log realized total vs
+  Robinhood's). The Market-Close task runs it and embeds the scorecard in its
+  notification; `reporting.py --commit` pushes `RESULTS.md` to the repo from any
+  push-enabled checkout so it is visible on GitHub.
 
 ---
 
@@ -164,8 +171,8 @@ log + Robinhood's realized P&L and commits it back to the repo.
 | **2** | Risk dials + cutoff: hard stop `0.15→0.10`, loss guardrail `0.60→0.10`, drawdown `0.15→0.08`, `EXECUTION_CUTOFF 20:00→19:00`, take-profit ticket (+30%) added to proposals | ✅ merged (#3) |
 | **3** | `vwap_dmi_screener.py` rebuilt — 5-min bars, session-anchored VWAP, warm-up seed (ENTRY_SPEC §2) | ✅ merged (#4) |
 | **4** | Pairs rebuilt — daily cointegration tier writes `pairs_today.json`, intraday 5-min z-score trigger reads it (ENTRY_SPEC §3) | ✅ merged (#5) |
-| **5** | `exit_manager.py` + new scheduled task — §5 rules, notify-and-confirm, 5-min cadence, all three strategies | ✅ this PR |
-| **6** | Reporting — `RESULTS.md` (win/loss/P&L vs Robinhood realized P&L) committed back to the repo each close | next |
+| **5** | `exit_manager.py` + new scheduled task — §5 rules, notify-and-confirm, 5-min cadence, all three strategies | ✅ merged (#6) |
+| **6** | Reporting — `RESULTS.md` (win/loss/P&L vs Robinhood realized P&L) committed back to the repo each close | ✅ this PR |
 
 Task-side (Chat, not this repo), in parallel: signal tasks → **15 min** cadence
 (confirmed 2026-09-07); SMC task fetches 5-min bars; re-pin each task's commit

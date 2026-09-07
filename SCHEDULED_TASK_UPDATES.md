@@ -100,6 +100,31 @@ STANDING RULE. Prompt:
 `exit_manager.py` writes `pending_exits.json` and `exit_state.json` in the task
 workspace and expires unconfirmed proposals after 45 min on its own.
 
+### G. `Market-Close Daily Summary` task — run `reporting.py` — ☐ TODO (PR 6)
+
+Add to that task's prompt, after the existing recap:
+
+> Build the reporting inputs from Robinhood:
+> - `--realized-json` — call `get_realized_pnl` for spans day / week / month /
+>   all; map to `{"today","week","month","all","trades_today","trades_week",
+>   "trades_month","trades_all"}`. Optionally compute `"win_rate"` from
+>   `get_pnl_trade_history`.
+> - `--closed-trades-json` — recent closes from `get_pnl_trade_history`, mapped
+>   to the fields in `reporting.py`'s docstring.
+> - `--account-json` — from `get_portfolio` + `get_option_positions` (+ a
+>   `get_option_quotes` per open position for `current_mark`).
+>
+> Run `python3 reporting.py --now-utc <ISO> --realized-json '…' --closed-trades-json '…' --account-json '…'`.
+> Put the printed "scorecard" block into the summary notification you send me.
+
+**Committing `RESULTS.md` to GitHub** — open question: does this task's container
+have git push credentials for `Codedecoder1/Trading-Pipetheway`?
+- If **yes**: add `--commit` to the `reporting.py` call.
+- If **no**: leave `--commit` off. `RESULTS.md` is in the notification anyway;
+  to get it onto GitHub, run `python3 reporting.py --commit` (with the same
+  inputs) from an interactive session that has a push-enabled checkout — e.g.
+  in Claude Code with the repo cloned.
+
 ---
 
 ## Trading-days schedule — ☐ confirm

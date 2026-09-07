@@ -52,6 +52,12 @@ def describe(ev):
         pnl_str = f"${pnl:+.2f}" if pnl is not None else "?"
         return (f"**CLOSED** ({ev.get('exit_reason')}) -- {tag}. Exit @ ${ev.get('exit_price')}, "
                 f"realized P&L {pnl_str}." + (f" {ev.get('notes')}" if ev.get('notes') else ""))
+    if e == "exit_proposed":
+        return (f"**Exit proposed** [{ev.get('rule')}] -- position `{ev.get('position_id')}`. "
+                f"{ev.get('reason', '')}")
+    if e == "exit_expired":
+        return (f"**Exit proposal expired unconfirmed** [{ev.get('rule')}] -- "
+                f"position `{ev.get('position_id')}`, sat {ev.get('age_minutes')} min.")
     return f"{e}: {ev}"
 
 

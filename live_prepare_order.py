@@ -204,6 +204,14 @@ print(f"SIGNAL: {args.symbol} {args.direction.upper()} ${args.strike} exp {args.
 print(f"Limit BUY 1 contract @ ${args.ask:.2f} (${args.ask*100:.2f} total). "
       f"Bid ${args.bid:.2f}. Planned GTC stop-loss @ ${hard_stop_price:.2f} (-15%).")
 print(f"Signal fired {args.signal_timestamp}. Order id {order_id}.")
+print("")
+print("STOP-LOSS -- place this immediately after the entry fills:")
+print(f"  {args.direction.upper()} to SELL / close: 1x {args.symbol} ${args.strike} "
+      f"{args.direction} exp {args.expiration}")
+print(f"  Order type   : stop-market (stop loss)")
+print(f"  Stop (trigger): ${hard_stop_price:.2f}   (entry ask ${args.ask:.2f} minus 15%, rounded to the cent)")
+print(f"  Time in force: GTC")
+print(f"  Option id    : {args.option_id}")
 sizing = results.get("sizing", {})
 if sizing.get("dynamic"):
     print(f"Sizing (live): budget ${sizing['max_premium']:.2f} from ${sizing['buying_power']:.2f} buying power, "

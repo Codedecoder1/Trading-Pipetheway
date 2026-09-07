@@ -43,17 +43,23 @@ Instead:
      (`pnl_guardrail.check_daily_loss_guardrail`) using today's realized P&L
      from Robinhood's own `get_realized_pnl`
    - if the guardrail hasn't tripped, checks the signal timestamp against
-     the **execution cutoff** (19:30:00 UTC as of REVISION 10, 2026-08-27
-     -- tighter than the 20:00:00 UTC scanner cutoff; a signal firing
-     after 19:30 UTC gets logged as signal-only, not traded, since there's
-     no same-day option data left to manage the exit plan). If it's still
-     eligible, pulls the account's current buying power and total equity
-     (`get_portfolio`), fetches the nearest expiration's full contract
+     the **execution cutoff** (20:00:00 UTC as of REVISION 11, 2026-09-06
+     -- now equal to the scanner cutoff, so any signal Layer 1 logs can
+     also be prepared; the old 19:30 gate assumed same-day scalps, which
+     no longer applies now that positions are ~2-week holds managed by a
+     hard stop). If it's still eligible, pulls the account's current
+     buying power and total equity (`get_portfolio`), fetches the
+     available expirations and picks the target one via
+     `resolve_expiration.py` -- **the first expiration ~2 weeks out**
+     (10-45 calendar days; `select_expiration.py`, 2026-09-06), NOT the
+     nearest weekly. If nothing is at least 10 days out the signal is
+     logged signal-only. It then fetches THAT expiration's full contract
      chain via `get_option_chains` / `get_option_instruments`, and runs it
-     through `diag/backtest/contract_selector.select_contract()`
-     (REVISION 2, 2026-08-28): ATM first, stepping down to a 0.25-0.35
-     delta OTM contract if ATM exceeds the budget cap -- which is no
-     longer a fixed $140, it's **85% of current buying power**, computed
+     through `contract_selector.select_contract()`: **ATM first**
+     (REVISION 6, 2026-09-06 disabled the forced-OTM path now that the
+     budget is large again), stepping down to a 0.20-0.35 delta OTM
+     contract only if ATM exceeds the budget cap -- which is
+     **85% of current buying power** (REVISION 7, 2026-09-06), computed
      live each cycle (`live_risk_checks.get_max_contract_budget()`).
      Whatever contract_selector picks still has to clear the real risk
      gate (`live_risk_checks.py`, via `live_prepare_order.py`), whose

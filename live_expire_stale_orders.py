@@ -11,7 +11,12 @@ from trade_log import append_event
 
 BACKTEST_DIR = '/home/claude/smc_bot/diag/backtest'
 PENDING_PATH = os.path.join(BACKTEST_DIR, 'pending_live_orders.json')
-STALE_MINUTES = 15
+STALE_MINUTES = 45  # 2026-09-06, per explicit user request: raised from 15 -> 45. The user
+                    # manually reviews and triple-checks every proposal before approving, which
+                    # regularly takes longer than 15 min. A proposal older than this is still
+                    # marked expired (its quoted price/spread is re-checked fresh at confirmation
+                    # time regardless, so a stale-but-unexpired proposal is not itself a risk --
+                    # this just controls when the bot stops waiting and moves on).
 
 if not os.path.exists(PENDING_PATH):
     print("no pending_live_orders.json yet -- nothing to expire")

@@ -1,2 +1,10 @@
 __pycache__/
 *.pyc
+
+# runtime state written by the tasks in their own cloud workspace -- not source
+pending_live_orders.json
+pending_exits.json
+exit_state.json
+pairs_today.json
+trade_log.jsonl
+*_log.jsonl

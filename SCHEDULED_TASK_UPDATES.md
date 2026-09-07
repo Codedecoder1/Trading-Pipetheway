@@ -74,6 +74,32 @@ hourly. If it's hourly, the 10/30-min resample produces garbage.
 Then continue into the existing `resolve_pairs_leg.py` × 2 → `pairs_prepare_order.py`
 package-proposal path unchanged.
 
+### F. NEW TASK — `Exit Monitor` — ☐ TODO (needed for PR 5)
+
+Create a **7th** scheduled task, `Exit Monitor`, firing **every 5 minutes**
+during 13:35–20:05 UTC (6:35 AM–1:05 PM PT), Mon–Fri. Carries the same
+STANDING RULE. Prompt:
+
+> 1. `get_option_positions` (nonzero) and `get_option_orders` (open) for account
+>    805015518. If there are no open option positions, stop.
+> 2. For each open position: `get_option_quotes` for its option id (bid/ask/mark);
+>    from the open orders, whether a resting stop-market sell exists for it.
+> 3. For a thesis check, re-fetch the underlying's recent 5-minute candles and
+>    re-run its entry detector (SMC `dry_run_check` / `vwap_dmi_screener`
+>    logic). Set `thesis_broken: true` if the opposite signal now fires or
+>    price recrossed the session VWAP against the position; `underlying_consolidating:
+>    true` if 3 consecutive 10-min candles sit inside ±0.25%.
+> 4. Build the positions JSON (fields per `exit_manager.py`'s docstring) and any
+>    open pairs packages, then run:
+>    `python3 exit_manager.py --positions-json '[...]' --pairs-json '[...]'
+>    --now-utc <ISO> --session-close-utc <today>T20:00:00Z`
+> 5. Send me every ticket it prints. **Do not place any closing order.** I
+>    confirm each one; then a separate interactive session (or I, in the app)
+>    places it.
+
+`exit_manager.py` writes `pending_exits.json` and `exit_state.json` in the task
+workspace and expires unconfirmed proposals after 45 min on its own.
+
 ---
 
 ## Trading-days schedule — ☐ confirm

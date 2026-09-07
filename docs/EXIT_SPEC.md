@@ -80,24 +80,27 @@ POC-reversal on the underlying) kept only as the "OLD" baseline in comparisons.
 
 ---
 
-## 4. Why this model does not fit the current strategy
+## 4. Trading style — resolved 2026-09-07
 
-The hybrid model was built for **same-day scalps** on near-dated options. The
-pipeline now buys **10–45 DTE** contracts meant to work over ~2–3 weeks
-(`select_expiration.py`, EXECUTION_CUTOFF raised to the session close). Against
-that horizon:
+All three strategies are **intraday**: enter on a minute-bar signal, take profit
+or stop out **the same session**, never hold overnight. The 10–45 DTE
+expiration is a **theta / pin cushion**, not a holding period — you buy time
+value you don't intend to use, so a few hours of being early doesn't decay the
+option or expose it to pin risk.
 
-- The **30-minute time-decay backstop** force-closes almost every trade within
-  the first hour. **Must be removed or raised to a multi-day value.**
-- The **3-candle consolidation stop** (10-min candles) fires on any quiet hour —
-  far too sensitive for a multi-day hold.
-- **6% / 12% premium trailing stops** are tight for a 2–3 week option that
-  swings intraday. Likely widen, or make them daily-bar based.
-- The **AI reversal exit** on 10-min candles is intraday logic; on a swing hold
-  it should read daily candles.
+This makes the hybrid model in §2 **mostly the right shape** — it was built for
+same-day scalps. What changes for the 2-week-cushion version:
 
-**Decision needed:** either (a) rework the exit model for a 2–3 week swing hold,
-or (b) go back to near-dated options and same-day exits. This doc assumes (a).
+- The **−15% → −10%** hard stop (Conservative).
+- **TP1 +25% → +30%.**
+- The **30-minute time backstop** was tuned for near-dated 0–2 DTE options where
+  theta is brutal by lunch. With a 2-week contract there's no theta emergency —
+  replace it with a **"dead trade" time stop** (flat, roughly ±8%, after
+  ~90 min → close) plus a hard **end-of-day close**.
+- Add an explicit **end-of-day flatten**: force-close everything ~15 min before
+  the session close. This is what makes it "same day."
+- The **3-candle / 10-min consolidation stop** and the **10-min reversal exit**
+  stay — they're the right resolution for an intraday trade.
 
 ---
 
@@ -116,22 +119,31 @@ discipline as entries: it **proposes** closes, it does not place them.
    write a **close proposal** to a `pending_exits.json` queue + notify.
 4. Never propose the same close twice while one is awaiting confirmation.
 
-### 5.2 Exit rules for a 2–3 week directional hold (▶ all PENDING review)
+### 5.2 Exit rules — intraday, same-day close (▶ all PENDING review)
 
-| rule | trigger | action |
-|---|---|---|
-| Hard stop | premium ≤ entry − **10%** | close 100% — this should already be a resting GTC order; the manager just alerts if it is missing |
-| Take-profit 1 | premium ≥ entry + **30%** | close **50%**, raise stop on the rest to breakeven |
-| Trailing (runner) | after TP1: premium falls **20%** off its post-TP1 peak (daily basis) | close remainder |
-| Thesis break | SMC: opposite POC-retest fires · VWAP/DMI: close crosses back through VWAP-200 against the position | close 100% |
-| Time stop | **8 calendar days** in trade with P&L between −10% and +15% | close 100% — do not ride theta into the last week |
-| Expiry guard | **2 trading days** to expiration, still open | close 100% regardless |
+Evaluated every 5 min against the live option premium and the underlying.
+
+| # | rule | trigger | action |
+|---|---|---|---|
+| 1 | **Hard stop** | premium ≤ entry − **10%** | close 100%. Should also be a resting GTC stop-market placed at entry; the manager alerts if it's missing. |
+| 2 | **End-of-day flatten** | **15 min before session close**, still open | close 100%, unconditionally. This is the "same day" guarantee. |
+| 3 | **Take-profit 1** | premium ≥ entry + **30%** | close **50%**, move stop on the rest to breakeven (entry). |
+| 4 | **Runner trailing stop** | after TP1: premium falls **20%** off its highest point since TP1 | close remainder |
+| 5 | **Dead-trade time stop** | ~**90 min** in trade and premium within **±8%** of entry | close 100% — capital isn't working, free it up |
+| 6 | **Thesis break** | SMC: opposite POC-retest fires · VWAP/DMI: close crosses back through the VWAP-200 against the position | close 100% |
+| 7 | **Consolidation stop** | 3 consecutive 10-min underlying candles inside a ±0.25% band | close 100% |
+
+No overnight holds, ever — rule 2 covers the case where nothing else fired.
 
 ### 5.3 Pairs exits (separate path)
 
-Re-check the pair's live z-score each cycle. `|z| ≤ 0.1` → propose closing both
-legs (target hit). `|z| ≥ 3.5` → propose closing both legs (abandon). No premium
-stop.
+Re-check the pair's live z-score each cycle:
+- `|z| ≤ 0.1` → propose closing both legs (target hit).
+- `|z| ≥ 3.5` → propose closing both legs (abandon).
+- **End-of-day flatten** (rule 2 above) applies to the package too — close both
+  legs 15 min before the close if still open.
+
+No premium stop on the package.
 
 ### 5.4 Logging
 
@@ -144,7 +156,14 @@ the record is visible on GitHub, not just in the task's cloud workspace.
 
 ## 6. Build order
 
-1. This spec — agree on §4 (swing vs near-dated) and §5.2 numbers.
-2. Risk-dial PR — the `▶ PENDING` constants in §1–2 and ENTRY_SPEC §4.
-3. `exit_manager.py` + its scheduled task — §5, notify-and-confirm.
-4. Reporting PR — `RESULTS.md`, win/loss/P&L, committed back to the repo.
+1. **This spec** — confirm the §5.2 rules and numbers (hard stop −10%, TP1 +30%
+   / half, runner trail 20%, dead-trade 90 min / ±8%, EOD flatten −15 min).
+2. **Risk-dial PR** — the `▶ PENDING` constants in §1–2 and ENTRY_SPEC §4.2/4.6,
+   plus `EXECUTION_CUTOFF` → 19:00 UTC (ENTRY_SPEC §4.3).
+3. **`exit_manager.py` + its scheduled task** — §5, notify-and-confirm, 5-min
+   cadence. Applies to all three strategies now.
+4. **Task-prompt changes** (Chat side, not this repo) — signal tasks fire every
+   15–30 min; confirm SMC fetches 5-min bars; decide VWAP/DMI + Pairs bar basis
+   (ENTRY_SPEC §5.4–5.5).
+5. **Reporting PR** — `RESULTS.md`, win/loss/P&L vs Robinhood realized P&L,
+   committed back to the repo so it's visible on GitHub.

@@ -10,6 +10,12 @@ yet, landing in a separate PR).
 Nothing in this pipeline places an order. Every path below ends at a **written
 proposal + notification**, and a human confirms and places the trade.
 
+**Trading style (agreed 2026-09-07): all three strategies are intraday.** Signal
+on minute bars → enter a call or put → take profit or stop out **the same
+session**. The 10–45 DTE expiration (§4.4) is bought as a **theta / pin-risk
+cushion**, not a holding period — the position is not meant to be held
+overnight. Exit management is covered in `EXIT_SPEC.md`.
+
 ---
 
 ## 0. The shape of every entry
@@ -151,9 +157,18 @@ reaches a fraction of day-start buying power.
 Signal timestamp ≤ `EXECUTION_CUTOFF` (**20:00 UTC** as of REVISION 11).
 A later signal is logged `signal_only_not_executed` — no proposal.
 
+▶ **PENDING — needs a decision.** REVISION 11 raised this to 20:00 (session
+close) *because* positions were going to be 2-week holds. Now that every trade
+is exited the same day, a signal at 19:55 UTC has ~5 minutes of runway before
+the close — not enough to manage a target/stop exit. Recommend dropping it back
+to **19:00 UTC (12:00 PT)** so there is at least an hour to work the exit.
+
 ### 4.4 Expiration — `select_expiration.py`
 First listed expiration **10–45 calendar days** out (`MIN_DTE = 10`,
 `MAX_DTE = 45`). If nothing is ≥ 10 days out → `signal_only`.
+Kept as-is (confirmed 2026-09-07): the DTE cushion is deliberate even though
+the trade is closed same-day — it keeps theta and pin risk off the position
+during the hours it is open.
 
 ### 4.5 Contract selection — `contract_selector.py`
 ATM first (closest `|delta|` to 0.50). If ATM's `ask × 100` exceeds the budget,
@@ -185,12 +200,26 @@ Notification sent. Expires unconfirmed after **45 min**
 
 ## 5. Open questions for review
 
-1. **Schedule.** Code comments say SMC = Mon/Tue/Thu/Fri, VWAP/DMI = Wed only,
-   Pairs = Thu. The live tasks appear to run all three daily/hourly. Which is
-   intended? This doc describes *signal logic*, not the schedule — the schedule
-   lives in the task definitions.
-2. **VWAP/DMI + Pairs expiration.** They previously targeted ~21 DTE; they now
-   use the shared 10–45 window (first in range). Confirmed "leave it" 2026-09-07;
-   noted here so it is not forgotten.
-3. **SMC bar interval.** `detect_smc_manipulation_reversal` is interval-agnostic;
-   the original design used 15-minute bars. Confirm what the live task feeds it.
+Now that all three strategies are intraday (agreed 2026-09-07), these need
+answers before the exit-manager and task-prompt changes:
+
+1. **Execution cutoff** — drop `EXECUTION_CUTOFF` back to 19:00 UTC? (§4.3)
+2. **Task cadence** — all three signal tasks should fire every **15–30 min**
+   during market hours, not hourly. The SMC runbook says "every 30 min"; the
+   live task list shows hourly. Set all three to 15 or 30 min. (Task-side change,
+   Chat interface — not this repo.)
+3. **SMC bars** — `dry_run_check.py` already expects **5-minute** bars
+   (resampled to 5/10/30). Confirm the SMC task's `get_equity_historicals` call
+   requests 5-minute bars, not hourly (hourly input silently breaks the 10/30
+   resample).
+4. **VWAP/DMI bar basis** — the screener uses a **200-bar hourly** VWAP
+   (~30 trading days of context) and `ADX(14)` hourly. For an intraday trade,
+   is that still the signal you want, or should it move to intraday bars
+   (e.g. session-anchored VWAP + 5-min ADX)? This is a strategy-design call,
+   not a config tweak.
+5. **Pairs bar basis** — the scanner runs cointegration + a 60-bar z-score on
+   **hourly** bars over ~60–90 sessions. Intraday pairs trading would use minute
+   bars over a shorter window — a different statistical setup. Keep hourly, or
+   redesign?
+6. **Schedule (days).** Code comments say SMC = Mon/Tue/Thu/Fri, VWAP/DMI = Wed
+   only, Pairs = Thu; the live tasks appear to run all three every day. Confirm.

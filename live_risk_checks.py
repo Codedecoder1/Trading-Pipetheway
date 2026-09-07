@@ -130,9 +130,21 @@ as a deliberate, explicit tradeoff -- worth revisiting if the account
 balance changes a lot in either direction. MAX_PREMIUM_PER_CONTRACT (the
 static fallback for callers without a live buying_power figure) is
 updated to match at today's account size: 182.64 * 0.40 = ~$73.06.
+
+REVISION 7 (2026-09-06), per explicit user request -- get_max_contract_budget()'s
+multiplier raised from 0.40 to 0.85 (85% of buying power per trade). This
+is the same value REVISION 1 originally used, before the REVISION 4/5/6
+small-account walk-down. The user reviews and triple-checks every proposal
+by hand before approving it and explicitly accepts the concentrated risk:
+at ~$168 buying power this sizes one contract at up to ~$143, so in
+practice one open position at a time on the current account. Still a
+percentage of live buying power (scales with the account, no fixed dollar
+number to go stale). MAX_PREMIUM_PER_CONTRACT (the static fallback for
+callers without a live buying_power figure) updated to match at today's
+account size: 168.12 * 0.85 = ~$142.90.
 """
 
-MAX_PREMIUM_PER_CONTRACT = 73.06
+MAX_PREMIUM_PER_CONTRACT = 142.90
 MIN_PREMIUM_TOTAL = 15.00
 MAX_SPREAD_PCT = 0.10
 MAX_OPEN_POSITIONS = 5
@@ -167,7 +179,7 @@ def get_market_regime(vix: float) -> dict:
 
 # Dynamic Sizing Functions
 def get_max_contract_budget(buying_power: float, vix: float = None) -> float:
-    budget = buying_power * 0.40  # REVISION 6: caps any one trade at 40% of buying power (was 25%)
+    budget = buying_power * 0.85  # REVISION 7: caps any one trade at 85% of buying power (was 40%)
     if vix is not None:
         budget *= get_market_regime(vix)["size_multiplier"]
     return budget

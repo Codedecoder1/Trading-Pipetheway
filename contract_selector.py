@@ -101,6 +101,19 @@ in for almost every underlying in this pipeline's usual universe (SMC's
 scan floor alone is $10, so nearly everything it surfaces now clears
 $15), not just the pricier names. ATM is still tried first, and can still
 be picked, for anything $15 and under.
+
+REVISION 6 (2026-09-06), per explicit user request: SMALL_ACCOUNT_PRICE_THRESHOLD
+raised from $15 to $1000 -- i.e. the forced-OTM path is now effectively
+disabled for this pipeline's whole universe. Paired with live_risk_checks.py
+REVISION 7 (budget back to 85% of buying power): with a ~$143 budget the
+ATM contract fits for most names the scans surface, so "try ATM first"
+(higher delta, higher probability of finishing in-the-money, more gamma
+near entry) becomes the default again. The 0.25-0.35 delta OTM step
+(DELTA_BAND) still runs as the affordability fallback for any underlying
+whose ATM does not fit the budget -- it just is not force-selected
+anymore, and the tighter 0.20-0.25 HIGH_PRICE_DELTA_BAND is now
+unreachable in practice. Raise/lower this constant if you want the
+forced-OTM behavior back for pricier names.
 """
 import sys
 sys.path.insert(0, '/home/claude/smc_bot/diag/backtest')
@@ -109,8 +122,9 @@ from live_risk_checks import get_max_contract_budget, MAX_PREMIUM_PER_CONTRACT
 TARGET_DELTA = 0.30
 DELTA_BAND = (0.25, 0.35)
 
-# REVISION 4 (forced-OTM path for pricier underlyings), REVISION 5 (threshold $40 -> $15).
-SMALL_ACCOUNT_PRICE_THRESHOLD = 15.0
+# REVISION 4 (forced-OTM path for pricier underlyings), REVISION 5 ($40 -> $15),
+# REVISION 6 ($15 -> $1000, i.e. forced-OTM effectively disabled -- ATM-first default).
+SMALL_ACCOUNT_PRICE_THRESHOLD = 1000.0
 HIGH_PRICE_DELTA_BAND = (0.20, 0.25)
 HIGH_PRICE_TARGET_DELTA = 0.225
 

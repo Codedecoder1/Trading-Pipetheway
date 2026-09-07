@@ -126,7 +126,11 @@ diagnostic push produced no branch on the repo). Consequences:
 
 ---
 
-## Trading-days schedule — confirm
+## Trading-days schedule — DECIDED 2026-09-07: all 5 weekdays
 
-Code comments say SMC = Mon/Tue/Thu/Fri, VWAP/DMI = Wed only, Pairs = Thu; the
-tasks seem to run all three daily. Decide and set the crons to match.
+All three signal strategies (SMC, VWAP/DMI, Pairs) run **Monday–Friday**. The
+old SMC = Mon/Tue/Thu/Fri · VWAP/DMI = Wed-only · Pairs = Thu split is retired —
+the strategies are now the same intraday shape and independent, and the
+position cap / budget gates handle any overlap. Every cron in the task table
+above already ends in `* * 1-5`; make sure no task carries a leftover day
+restriction (a Wed-only or Thu-only clause) from the old design.

@@ -41,20 +41,32 @@ real defects before touching real money):
      19:30 UTC execution cutoff via check_execution_time()). This script
      never touches pending_live_orders.json.
 
-Entry conditions (all three must hold on the latest hourly bar):
-  - VWAP-200 cross: close crosses from below/above the rolling 200-bar
-    VWAP to above/below it (vs. the previous bar).
+REVISION 18 (2026-09-07), per explicit user request -- INTRADAY REBUILD.
+The strategy is now a same-day trade (see docs/ENTRY_SPEC.md section 2), so the
+hourly machinery is replaced:
+  - Bars: 5-minute (was hourly). The calling session stages the PRIOR
+    session plus today, so ADX(14)/ATR(14) are warm from the open instead
+    of only stabilising mid-morning.
+  - VWAP: session_vwap() -- a session-anchored VWAP that resets at each UTC
+    day's first bar -- replaces the rolling 200-bar VWAP (which, on hourly
+    bars, was ~30 trading days of context: a swing-trend filter, not an
+    intraday one). Feeding it the prior session does not contaminate today's
+    anchor: each day is its own cumulative VWAP.
+
+Entry conditions (all three must hold on the latest CLOSED 5-minute bar,
+and the cross must be between two of TODAY's bars):
+  - Session-VWAP cross: close crosses the session VWAP vs. the previous
+    5-minute bar. Up-cross -> call, down-cross -> put.
   - DMI alignment: +DI > -DI for a bullish cross, -DI > +DI for a bearish
     cross (14-period, Wilder-smoothed).
   - Trend strength: ADX(14) > 20.
 
 On a qualifying signal, computes (informational only -- this script does
-NOT enforce or place any stop/target; the live bot never manages exits
-automatically, same as every other strategy here -- these numbers are
-for the calling session to report to the user as reference, not acted on):
-  stop_distance = 2.5 * ATR(14)
-  stop_loss   = close -/+ stop_distance   (bullish/bearish)
-  take_profit = close +/- 3 * stop_distance
+NOT enforce or place any stop/target; exits are managed separately, see
+docs/EXIT_SPEC.md -- these numbers are reference for the calling session):
+  stop_distance = 1.5 * ATR(14, 5-min)     (tighter than the old 2.5x, intraday)
+  stop_loss   = close -/+ stop_distance     (bullish/bearish)
+  take_profit = close +/- 2 * stop_distance
 
 HARD RULE: same as every other script in this pipeline -- this file calls
 NO broker/order tools whatsoever. It cannot place, review, or prepare a
@@ -65,7 +77,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from vwap_dmi_indicators import rolling_vwap, adx_dmi, atr
+from vwap_dmi_indicators import session_vwap, adx_dmi, atr
 
 FALLBACK_WATCHLIST = [
     "AMD", "NVDA", "AAPL", "PLTR", "MSFT", "TSLA", "AMZN", "GOOGL",
@@ -94,10 +106,17 @@ def load_universe(path: str = UNIVERSE_FILE, fallback=None) -> list:
 
 WATCHLIST = load_universe()
 
-VWAP_WINDOW = 200
+BAR_INTERVAL = "5min"          # REVISION 18: the screener runs on 5-minute bars now, not hourly
+VWAP_WINDOW = 200             # LEGACY -- only walkforward_wed_vwap_dmi.py (backtest of the
+                             # pre-REVISION-18 hourly strategy) still reads this. The live
+                             # screener uses session_vwap(), no window.
 DMI_ADX_LENGTH = 14
 ADX_MIN = 20.0
-MIN_BARS_REQUIRED = VWAP_WINDOW + 10  # a little buffer past the full rolling window
+ATR_STOP_MULT = 1.5           # reference stop distance = ATR_STOP_MULT * ATR(14)
+ATR_TARGET_MULT = 2.0        # reference target distance = ATR_TARGET_MULT * stop_distance
+MIN_BARS_REQUIRED = 40        # ADX(14) needs ~2x14 bars to stabilise; a ~40-bar prior-session
+                             # warm-up seed covers this from today's open
+MIN_SESSION_BARS = 2         # need 2 of today's bars to detect a same-session VWAP cross
 
 BACKTEST_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_DIR = os.path.join(BACKTEST_DIR, "vwap_dmi_raw")
@@ -106,7 +125,7 @@ LOG_PATH = os.path.join(BACKTEST_DIR, "vwap_dmi_log.jsonl")
 
 def _load_bars_for_symbol(sym: str, raw_dir: str) -> pd.DataFrame:
     """Consolidates every staged batch file that contains this symbol's
-    hourly bars into one sorted, deduped DataFrame."""
+    5-minute bars (prior session + today) into one sorted, deduped DataFrame."""
     frames = []
     if not os.path.isdir(raw_dir):
         return pd.DataFrame()
@@ -144,16 +163,24 @@ def evaluate(raw_dir: str = RAW_DIR, watchlist=None) -> list:
         if len(df) < MIN_BARS_REQUIRED:
             continue
 
-        df["vwap_200"] = rolling_vwap(df, window=VWAP_WINDOW, min_periods=20)
+        df["svwap"] = session_vwap(df, ts_col="begins_at")
         dmi = adx_dmi(df, length=DMI_ADX_LENGTH)
         df["adx"] = dmi["adx"]
         df["plus_di"] = dmi["plus_di"]
         df["minus_di"] = dmi["minus_di"]
         df["atr"] = atr(df, length=DMI_ADX_LENGTH)
 
-        curr = df.iloc[-1]
-        prev = df.iloc[-2]
-        if pd.isna(curr["vwap_200"]) or pd.isna(prev["vwap_200"]) or pd.isna(curr["adx"]):
+        # Restrict the cross check to TODAY's session (the last calendar day
+        # present) so a cross is never detected across the prior-session
+        # boundary that only exists to warm up ADX/ATR.
+        last_day = df["begins_at"].iloc[-1].normalize()
+        today = df[df["begins_at"].dt.normalize() == last_day].reset_index(drop=True)
+        if len(today) < MIN_SESSION_BARS:
+            continue
+
+        curr = today.iloc[-1]
+        prev = today.iloc[-2]
+        if pd.isna(curr["svwap"]) or pd.isna(prev["svwap"]) or pd.isna(curr["adx"]):
             continue
 
         close_price = float(curr["close"])
@@ -162,21 +189,21 @@ def evaluate(raw_dir: str = RAW_DIR, watchlist=None) -> list:
         minus_di = float(curr["minus_di"])
         atr_val = float(curr["atr"])
 
-        bullish_cross = (prev["close"] <= prev["vwap_200"]) and (curr["close"] > curr["vwap_200"])
-        bearish_cross = (prev["close"] >= prev["vwap_200"]) and (curr["close"] < curr["vwap_200"])
+        bullish_cross = (prev["close"] <= prev["svwap"]) and (curr["close"] > curr["svwap"])
+        bearish_cross = (prev["close"] >= prev["svwap"]) and (curr["close"] < curr["svwap"])
 
         signal_type = None
         if bullish_cross and plus_di > minus_di and adx_val > ADX_MIN:
             signal_type = "BULLISH_CALL"
-            stop_distance = 2.5 * atr_val
+            stop_distance = ATR_STOP_MULT * atr_val
             stop_loss = round(close_price - stop_distance, 2)
-            take_profit = round(close_price + stop_distance * 3.0, 2)
+            take_profit = round(close_price + stop_distance * ATR_TARGET_MULT, 2)
             direction = "call"
         elif bearish_cross and minus_di > plus_di and adx_val > ADX_MIN:
             signal_type = "BEARISH_PUT"
-            stop_distance = 2.5 * atr_val
+            stop_distance = ATR_STOP_MULT * atr_val
             stop_loss = round(close_price + stop_distance, 2)
-            take_profit = round(close_price - stop_distance * 3.0, 2)
+            take_profit = round(close_price - stop_distance * ATR_TARGET_MULT, 2)
             direction = "put"
         else:
             continue
@@ -191,13 +218,14 @@ def evaluate(raw_dir: str = RAW_DIR, watchlist=None) -> list:
             "signal": signal_type,
             "timestamp": ts_str,
             "entry_price": close_price,
+            "session_vwap": round(float(curr["svwap"]), 4),
             "adx_14": round(adx_val, 2),
             "plus_di_14": round(plus_di, 2),
             "minus_di_14": round(minus_di, 2),
-            "atr_14": round(atr_val, 2),
+            "atr_14": round(atr_val, 4),
             "stop_loss_reference": stop_loss,
             "take_profit_reference": take_profit,
-            "strategy": "VWAP200_DMI_ADX",
+            "strategy": "SESSION_VWAP_DMI_ADX",
         })
     return hits
 
@@ -211,7 +239,7 @@ def log_hits(hits):
 
 
 if __name__ == "__main__":
-    print(f'=== VWAP-200/DMI/ADX Wednesday screener @ {datetime.now(timezone.utc).isoformat()} ===')
+    print(f'=== Session-VWAP/DMI/ADX intraday screener (5-min) @ {datetime.now(timezone.utc).isoformat()} ===')
     print(f"Watchlist: {len(WATCHLIST)} symbols")
 
     hits = evaluate()

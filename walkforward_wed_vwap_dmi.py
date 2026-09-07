@@ -1,4 +1,12 @@
 """
+SUPERSEDED (2026-09-07, REVISION 18): this harness backtests the OLD hourly
+VWAP-200/DMI/ADX strategy. The live screener has since been rebuilt around
+5-minute bars and a session-anchored VWAP (see vwap_dmi_screener.py REVISION
+18 and docs/ENTRY_SPEC.md section 2). This file is kept for historical
+comparison only and still imports the legacy VWAP_WINDOW constant; it does
+NOT reflect what the live strategy now does. A new walk-forward harness for
+the intraday version is TODO.
+
 Walk-forward backtest harness for the VWAP-200/DMI/ADX Wednesday-only
 strategy (2026-08-30), mirroring walkforward_week.py's approach for the
 SMC bot: the live Wednesday trigger fires every 30 minutes, 13:30-19:30

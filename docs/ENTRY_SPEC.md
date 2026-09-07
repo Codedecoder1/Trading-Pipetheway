@@ -3,9 +3,9 @@
 Single source of truth for **when the pipeline proposes a trade**. If the code
 and this document disagree, that is a bug in one of them — say so in the PR.
 
-Status: current through the "risk dials" PR (2026-09-07) — Conservative dials
-and the noon cutoff are in code. Still `▶ INTRADAY REBUILD` (to build): the
-VWAP/DMI and Pairs minute-bar rebuilds in §2 and §3.
+Status: current through PR 3 (2026-09-07) — Conservative dials, noon cutoff, and
+the VWAP/DMI intraday rebuild are in code. Still `▶ INTRADAY REBUILD` (to build):
+the Pairs minute-bar rebuild in §3.
 
 Nothing in this pipeline places an order. Every path below ends at a **written
 proposal + notification**, and a human confirms and places the trade.
@@ -80,41 +80,42 @@ live universe file is missing.
 scanner backend caps near 400). Falls back to a fixed 24-symbol list if the file
 is missing.
 
-### ▶ INTRADAY REBUILD (agreed 2026-09-07 — to build)
+### Signal — intraday (rebuilt 2026-09-07, PR 3 · REVISION 18)
 
-The current signal is hourly-bar machinery: a 200-*hour* VWAP is ~30 trading
-days of context, which is a swing-trend filter, not an intraday one. Rebuild:
+**Bars.** 5-minute. The task fetches the **prior session + today** so `ADX(14)`
+and `ATR(14)` are warm from the open; the session VWAP still starts fresh each
+day (it groups by UTC date, so the prior session doesn't contaminate it).
 
-**Bars.** 5-minute. Fetch the **prior session + today** so `ADX`/`ATR` are warm
-at the open; VWAP uses **today only**.
+**VWAP.** `session_vwap()` — a session-anchored VWAP that resets at each UTC
+day's first bar. Replaces the old 200-*hour* rolling VWAP (~30 trading days of
+context — a swing filter, not an intraday one).
 
-**VWAP.** Switch from a 200-bar rolling VWAP to a **session-anchored VWAP** that
-resets each day at the 13:30 UTC open — the standard intraday reference.
+**Signal** — all three, evaluated on the latest *closed* 5-minute bar, with the
+cross required to be between two of **today's** bars:
 
-**Signal** — all three on the latest *closed* 5-minute bar:
+1. **Session-VWAP cross.** Close crosses `session_vwap` vs the previous 5-min
+   bar. Up → call, down → put.
+2. **DMI alignment.** `+DI > −DI` (bull) / `−DI > +DI` (bear), 14-period.
+3. **Trend strength.** `ADX(14) > 20`.
 
-1. **Session-VWAP cross.** Close crosses the session VWAP vs the previous 5-min
-   bar. Up → bullish (call); down → bearish (put).
-2. **DMI alignment.** `+DI > −DI` (bull) / `−DI > +DI` (bear), 14-period on
-   5-min bars.
-3. **Trend strength.** `ADX(14) > 20` on 5-min bars.
+The screener re-runs every 15 min, so it catches the cross in the cycle it
+happens — it does not fire on a stale cross from earlier in the session.
 
-**Reference levels** (still informational): `stop_distance = 1.5 × ATR(14, 5-min)`
-— tighter than the old 2.5×, intraday — `target = 2 × stop_distance`.
+**Reference levels** (informational; real exits are in EXIT_SPEC):
+`stop_distance = 1.5 × ATR(14, 5-min)`, `target = 2 × stop_distance`.
 
-**Warm-up.** `ADX(14)` needs ~20 5-min bars. Seeding from the prior session's
-last ~40 bars lets signals fire from the open instead of ~9:00 AM PT.
-
-**Parameters (proposed)**
+**Parameters** (`vwap_dmi_screener.py`)
 
 | name | value |
 |---|---|
-| bar interval | `5min` |
-| `VWAP_ANCHOR` | session open (13:30 UTC) |
+| `BAR_INTERVAL` | `5min` |
+| VWAP | `session_vwap()`, resets each UTC day |
 | `DMI_ADX_LENGTH` | 14 |
 | `ADX_MIN` | 20.0 |
 | `ATR_STOP_MULT` | 1.5 |
-| warm-up seed | prior session, ~40 bars |
+| `ATR_TARGET_MULT` | 2.0 (× stop_distance) |
+| `MIN_BARS_REQUIRED` | 40 (warm-up seed) |
+| `MIN_SESSION_BARS` | 2 |
 
 <details><summary>Previous (hourly / swing) signal — for reference</summary>
 

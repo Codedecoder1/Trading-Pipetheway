@@ -17,12 +17,41 @@ import pandas as pd
 
 
 def rolling_vwap(df: pd.DataFrame, window: int = 200, min_periods: int = 20) -> pd.Series:
-    """Rolling `window`-bar VWAP: sum(typical_price * volume) / sum(volume)."""
+    """Rolling `window`-bar VWAP: sum(typical_price * volume) / sum(volume).
+
+    Kept for the legacy/backtest path. The live intraday screener uses
+    session_vwap() below.
+    """
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     tp_vol = typical_price * df["volume"]
     rolling_tp_vol = tp_vol.rolling(window=window, min_periods=min_periods).sum()
     rolling_vol = df["volume"].rolling(window=window, min_periods=min_periods).sum()
     return rolling_tp_vol / rolling_vol
+
+
+def session_vwap(df: pd.DataFrame, ts_col: str = "begins_at") -> pd.Series:
+    """Session-anchored VWAP -- the standard intraday reference.
+
+    Cumulative sum(typical_price * volume) / cumulative sum(volume), reset at
+    the start of each UTC calendar day. Feeding the screener the prior
+    session plus today (so ADX/ATR are warm at the open) therefore does NOT
+    contaminate today's VWAP: each day is its own cumulative anchor.
+
+    df needs open/high/low/close/volume plus either a `ts_col` column or a
+    DatetimeIndex. Returns a Series aligned to df's index.
+    """
+    if ts_col in df.columns:
+        ts = pd.to_datetime(df[ts_col])
+    else:
+        ts = df.index.to_series()
+        ts = pd.to_datetime(ts)
+    day = ts.dt.normalize()  # midnight of each bar's day -- the grouping key
+
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
+    tp_vol = typical_price * df["volume"]
+    cum_tp_vol = tp_vol.groupby(day.values).cumsum()
+    cum_vol = df["volume"].groupby(day.values).cumsum()
+    return cum_tp_vol / cum_vol
 
 
 def _wilder_smooth(series: pd.Series, length: int) -> pd.Series:

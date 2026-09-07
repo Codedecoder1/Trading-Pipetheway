@@ -105,14 +105,19 @@ universe is top-30-per-index (NASDAQ/S&P/Dow), filtered live each cycle to
 Once you answer 2–4 and the account shows a real balance, I'll wire up the
 scheduled tasks and we can start in dry-run mode.
 
-## Second strategy: VWAP/DMI Wednesday-only (REVISION 16, 2026-08-30)
+## Second strategy: VWAP/DMI (REVISION 16, 2026-08-30)
 
-Per explicit user request, the SMC strategy above now runs **Monday,
+> **SUPERSEDED 2026-09-07:** the day-split below is retired. All three signal
+> strategies (SMC, VWAP/DMI, Pairs) now run **Monday–Friday**, ~every 30 min,
+> as independent tasks — see `docs/ENTRY_SPEC.md` and `SCHEDULED_TASK_UPDATES.md`.
+> The paragraph below is kept only for history.
+
+~~Per explicit user request, the SMC strategy above now runs **Monday,
 Tuesday, Thursday, Friday only** (`SMC Bot Live Signal Monitor`, cron
 `30 13-19 * * 1,2,4,5`). **Wednesday runs a second, separate strategy
 alone** on its own scheduled task (`VWAP/DMI Wednesday Signal Monitor`,
 trigger `trig_01MkGy9yo1MPckXnsdjGT7BJ`, cron `30 13-19 * * 3`) — the SMC
-task does not fire on Wednesdays at all.
+task does not fire on Wednesdays at all.~~
 
 The Wednesday strategy is a VWAP-200/DMI/ADX trend screener, built from a
 user-supplied script with two real defects fixed before it touched real

@@ -18,16 +18,24 @@ the strategy is split in two:
     an entry at |z| >= 2.0. No cointegration re-check -- the pair already
     qualified this morning.
 
+NO SHARED FILESYSTEM (2026-09-07). Scheduled firings run in fresh, empty
+containers that share nothing -- so a pairs_today.json merely *written* by
+the Market-Open task would be invisible to the Pairs monitor task. This
+script therefore COMMITS pairs_today.json to the repo (`--commit`), and
+pairs_arb_scanner.py reads it back with `git show origin/main:pairs_today.json`.
+Run the Market-Open task's daily-tier step with `--commit`.
+
 SIGNAL-ONLY discipline is unchanged: this file calls no broker/order tool.
-It only reads staged historicals and writes pairs_today.json.
+It reads staged historicals, writes pairs_today.json, and (with --commit)
+git-commits it.
 
 Usage:
-  python3 pairs_daily_tier.py <hourly_bars.json> [--session-date YYYY-MM-DD]
+  python3 pairs_daily_tier.py <hourly_bars.json> [--session-date YYYY-MM-DD] [--commit]
 
 <hourly_bars.json> is {symbol: [ {close_price, begins_at, ...}, ... ]},
 the same shape pairs_arb_scanner.py already consumes.
 """
-import json, os, sys
+import json, os, subprocess, sys
 from datetime import datetime, timezone, date
 
 import numpy as np
@@ -112,6 +120,33 @@ def write_pairs_today(payload: dict, path: str = PAIRS_TODAY_FILE):
         json.dump(payload, f, indent=2)
 
 
+def git_commit_pairs_today(path: str = PAIRS_TODAY_FILE):
+    """git add/commit/push pairs_today.json. Because scheduled firings share
+    no filesystem, committing it to the repo is how the intraday Pairs task
+    (which clones a pinned commit) gets today's pairs -- it reads them with
+    `git show origin/main:pairs_today.json`. Best-effort: prints and returns
+    False on any failure (no push creds, not a repo, nothing changed)."""
+    rel = os.path.relpath(path, BACKTEST_DIR)
+    try:
+        subprocess.run(["git", "-C", BACKTEST_DIR, "add", rel], check=True, capture_output=True)
+        st = subprocess.run(["git", "-C", BACKTEST_DIR, "status", "--porcelain", rel],
+                            capture_output=True, text=True)
+        if not st.stdout.strip():
+            print("pairs_today.json unchanged -- nothing to commit")
+            return False
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        subprocess.run(["git", "-C", BACKTEST_DIR, "commit", "-m",
+                        f"pairs: refresh pairs_today.json ({stamp})"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", BACKTEST_DIR, "push"], check=True, capture_output=True)
+        print("committed and pushed pairs_today.json")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as ex:
+        out = getattr(ex, "stderr", b"")
+        print(f"could not commit pairs_today.json ({ex}); "
+              f"{out.decode() if isinstance(out, bytes) else out}".strip())
+        return False
+
+
 if __name__ == "__main__":
     bars_path = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") \
         else "pairs_hourly_bars.json"
@@ -137,5 +172,9 @@ if __name__ == "__main__":
     if not payload["pairs"]:
         print("  (none -- the intraday tier will trade nothing today)")
 
+    if "--commit" in sys.argv:
+        git_commit_pairs_today()
+
     print("\nSIGNAL-ONLY -- no order tool was called. The intraday tier "
-          "(pairs_arb_scanner.py) reads pairs_today.json every cycle.")
+          "(pairs_arb_scanner.py) reads pairs_today.json via `git show origin/main:pairs_today.json` "
+          "each cycle -- run this with --commit so it is on the repo.")

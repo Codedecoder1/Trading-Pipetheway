@@ -192,16 +192,18 @@ def build_results(events, now_utc, realized=None, closed_trades=None, account=No
         L.append("")
 
     # ---- reconciliation ----
+    # The trade log is per-firing only (no shared filesystem), so it is NOT a
+    # full history -- only compare within this firing, and only when it
+    # actually recorded a close.
     log_closed = [e for e in events if e.get("event") == "position_closed"]
-    log_total = sum(_f(e.get("realized_pnl")) for e in log_closed)
-    if realized.get("all") is not None:
-        rh_total = _f(realized.get("all"))
-        diff = log_total - rh_total
-        flag = "" if abs(diff) < 0.01 else "  ⚠️ **mismatch -- investigate**"
-        L.append("## Reconciliation")
+    if log_closed and realized.get("today") is not None:
+        log_total = sum(_f(e.get("realized_pnl")) for e in log_closed)
+        rh_today = _f(realized.get("today"))
+        flag = "" if abs(log_total - rh_today) < 0.01 else "  **(!) differs from Robinhood -- check**"
+        L.append("## Reconciliation (this firing)")
         L.append("")
-        L.append(f"- Trade log realized total: {_money(log_total)} ({len(log_closed)} closes)")
-        L.append(f"- Robinhood realized (all time): {_money(rh_total)}{flag}")
+        L.append(f"- Closes recorded this run: {_money(log_total)} ({len(log_closed)})")
+        L.append(f"- Robinhood realized today: {_money(rh_today)}{flag}")
         L.append("")
 
     # ---- recent events ----
@@ -269,7 +271,7 @@ def main():
     account = _load(args.account_json, args.account_file, {})
 
     md = build_results(read_all(), args.now_utc, realized, closed, account)
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         f.write(md)
     print(f"wrote {args.out} ({len(md)} chars)")
 

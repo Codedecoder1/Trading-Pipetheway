@@ -1,10 +1,14 @@
 __pycache__/
 *.pyc
 
-# runtime state written by the tasks in their own cloud workspace -- not source
+# per-firing scratch -- scheduled firings share no filesystem, so these never
+# persist and must not be committed as if they were source
 pending_live_orders.json
 pending_exits.json
 exit_state.json
-pairs_today.json
 trade_log.jsonl
 *_log.jsonl
+
+# pairs_today.json IS committed (by pairs_daily_tier.py --commit) -- it is how
+# the intraday Pairs task gets the day's pairs across the no-shared-fs boundary.
+# Not ignored.

@@ -3,12 +3,13 @@
 Single source of truth for **when the pipeline proposes a trade**. If the code
 and this document disagree, that is a bug in one of them — say so in the PR.
 
-Status: current through PR 4 (2026-09-07) — Conservative dials, noon cutoff, and
-the VWAP/DMI + Pairs intraday rebuilds are all in code. Next: `exit_manager.py`
-(PR 5).
+Status: current through PR 7 (2026-09-07) — Conservative dials, noon cutoff, the
+VWAP/DMI + Pairs intraday rebuilds, `exit_manager.py`, `reporting.py`, and the
+stateless / no-shared-filesystem rework are all in code.
 
-Nothing in this pipeline places an order. Every path below ends at a **written
-proposal + notification**, and a human confirms and places the trade.
+**No task places an order.** Every path below ends at a **notification with a
+full bracket ticket**, and a human (or an interactive session) confirms and
+places the buy + the two resting orders.
 
 **Trading style (agreed 2026-09-07): all three strategies are intraday.** Signal
 on minute bars → enter a call or put → take profit or stop out **the same
@@ -27,12 +28,12 @@ scheduled task fires
   → run the strategy detector
   → on a hit:  Layer-1 filters → loss guardrail → execution cutoff
              → pick expiration → pick contract → risk gate → simulate
-             → write proposal to pending_live_orders.json + notify
+             → notify with the bracket ticket
   → STOP
 ```
 
-A failure at any gate is logged (`trade_log.jsonl`) and **no proposal is
-written**. Some failures are "signal-only" (nothing was wrong, there was just
+A failure at any gate is logged (best-effort, this firing only) and **no
+proposal is sent**. Some failures are "signal-only" (nothing was wrong, there
 no runway) and some are "rejected" (a risk limit was hit).
 
 ---
@@ -140,19 +141,23 @@ excluded; index exposure comes via SPY/QQQ/DIA/IWM.
 
 Cointegration on 5-minute noise is statistically weak, so it is split in two.
 
-**Daily tier — `pairs_daily_tier.py`** — runs once near the open (the
+**Daily tier — `pairs_daily_tier.py --commit`** — runs once near the open (the
 Market-Open Health Check task). Correlation pre-filter (`|corr| ≥ 0.80`) then
 the single-lag Dickey-Fuller cointegration test on **hourly** bars, requiring
-`≥ 250` aligned bars (`MIN_HOURLY_BARS`). Writes **`pairs_today.json`**: every
-pair with `p < 0.10`, each with a **fixed hedge ratio `β`**, its `p`, and its
-`|corr|`, sorted by `p`.
+`≥ 250` aligned bars (`MIN_HOURLY_BARS`). Writes **`pairs_today.json`** — every
+pair with `p < 0.10`, each with a **fixed hedge ratio `β`**, `p`, `|corr|`,
+sorted by `p` — and **commits it to the repo**. Firings share no filesystem, so
+this git commit is the only way the intraday tier gets today's pairs; it reads
+them back with `git show origin/main:pairs_today.json` (task prompt does
+`git fetch origin main` first). No push creds → no pairs traded that day.
 
 > The ADF residual now subtracts the OLS intercept (`a − intercept − β·b`), so
 > it is genuinely zero-mean — the "no constant" critical-value table assumes
 > that. Before this fix the test rejected almost nothing.
 
 **Intraday tier — `pairs_arb_scanner.py` → `scan_pairs_intraday()`** — runs
-every 15 min. Reads `pairs_today.json`; for each qualified pair:
+~every 30 min. `load_pairs_today()` reads the local file, else
+`git show origin/main:pairs_today.json`. For each qualified pair:
 
 1. Spread `= a − β·b` using the day's **fixed** `β` (no re-fit).
 2. Rolling z-score over **`Z_WINDOW_5MIN = 60` × 5-minute bars** (~5 hours),
@@ -234,11 +239,18 @@ Forced-OTM path is disabled (`SMALL_ACCOUNT_PRICE_THRESHOLD = 1000`).
 Prices the ticket, surfaces broker alerts. **Never submits.** Result is attached
 to the proposal.
 
-### 4.8 Proposal
-Appended (never overwritten) to `pending_live_orders.json` with a planned
-stop-loss ticket attached (see EXIT_SPEC §1), `status = awaiting_confirmation`.
-Notification sent. Expires unconfirmed after **45 min**
-(`live_expire_stale_orders.STALE_MINUTES`).
+### 4.8 Proposal — a 3-order bracket
+`live_prepare_order.py` prints the proposal as a **bracket** (see EXIT_SPEC §1):
+
+1. **Entry** — limit BUY to open @ the ask
+2. **Stop-loss** — resting `stop_market` SELL, `entry − 10%`, GTC
+3. **Take-profit** — resting `limit` SELL, `entry + 30%`, GTC (half on a ≥2-lot)
+
+At confirmation the human (or an interactive session) places all three — buy
+first, the two resting orders right after it fills. The resting stop and TP are
+what let the Exit Monitor run at 30-minute cadence. `pending_live_orders.json`
+is still written for that firing's own bookkeeping, but it does not persist and
+nothing reads it later — the human acts on the notification text.
 
 ---
 

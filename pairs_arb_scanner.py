@@ -399,18 +399,40 @@ def scan_pairs(bars_by_symbol: dict, now_ts: str = None, buying_power: float = N
     return proposals
 
 
+def _pairs_today_from_git():
+    """Scheduled firings share no filesystem, so the daily tier commits
+    pairs_today.json to the repo (pairs_daily_tier.py --commit) and the
+    intraday tier reads it straight out of git -- `git show
+    origin/main:pairs_today.json` -- without disturbing its own pinned
+    checkout. The task prompt should `git fetch origin main` first."""
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    for ref in ("origin/main", "origin/HEAD", "HEAD"):
+        try:
+            out = subprocess.run(["git", "-C", here, "show", f"{ref}:pairs_today.json"],
+                                 capture_output=True, text=True, timeout=20)
+            if out.returncode == 0 and out.stdout.strip():
+                payload = json.loads(out.stdout)
+                if payload.get("pairs") is not None:
+                    return payload
+        except (subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
+            continue
+    return None
+
+
 def load_pairs_today(path: str = PAIRS_TODAY_FILE):
-    """Reads pairs_today.json (written by pairs_daily_tier.py). Returns the
-    parsed payload, or None if the file is missing/empty/corrupt -- the
-    caller then falls back to the legacy all-in-one scan_pairs()."""
+    """Returns the pairs_today payload (from pairs_daily_tier.py), or None.
+    Tries a local file first (dry runs / same-container tests), then reads
+    the committed copy out of git (the live path -- see _pairs_today_from_git).
+    None -> the caller falls back to the legacy all-in-one scan_pairs()."""
     try:
         with open(path) as f:
             payload = json.load(f)
-        if payload.get("pairs"):
+        if payload.get("pairs") is not None:
             return payload
     except (FileNotFoundError, json.JSONDecodeError):
         pass
-    return None
+    return _pairs_today_from_git()
 
 
 def scan_pairs_intraday(bars_by_symbol: dict, pairs_today: dict, now_ts: str = None,

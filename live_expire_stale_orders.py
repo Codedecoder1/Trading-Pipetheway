@@ -1,8 +1,13 @@
 """
 Marks any pending_live_orders.json entry still "awaiting_confirmation" and
-older than STALE_MINUTES as "expired". Run at the START of every scheduled
-firing, before preparing any new order, so a proposal from an hour ago
-can never get silently confirmed against a price that's no longer real.
+older than STALE_MINUTES as "expired".
+
+NOTE (2026-09-07): scheduled firings share no filesystem, so
+pending_live_orders.json never survives a firing -- this script now always
+finds an empty file and is effectively a no-op in the live pipeline. It is
+kept only for local/interactive use where a pending file does exist. Stale
+proposals are not a real risk anyway: price/spread are re-checked fresh at
+confirmation time, and the human acts on the notification text, not this file.
 """
 import json, os, sys
 from datetime import datetime, timezone

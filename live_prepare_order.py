@@ -74,7 +74,8 @@ from datetime import datetime, timezone
 import sys
 sys.path.insert(0, '/home/claude/smc_bot')
 sys.path.insert(0, '/home/claude/smc_bot/diag/backtest')
-from live_risk_checks import run_all_checks, compute_hard_stop_price
+from live_risk_checks import (run_all_checks, compute_hard_stop_price,
+                              compute_take_profit_price, HARD_STOP_PCT, TAKE_PROFIT_PCT)
 from trade_log import append_event
 from contract_filters import check_execution_time, EXECUTION_CUTOFF
 
@@ -155,6 +156,11 @@ if not all_pass:
 
 order_id = str(uuid.uuid4())
 hard_stop_price = compute_hard_stop_price(args.ask)
+take_profit_price = compute_take_profit_price(args.ask)
+# "Sell half at TP" needs >= 2 contracts; a 1-lot closes in full at the target.
+entry_qty = 1
+tp_qty = entry_qty // 2 if entry_qty >= 2 else entry_qty
+runner_qty = entry_qty - tp_qty
 order = {
     "order_id": order_id,
     "prepared_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -173,6 +179,11 @@ order = {
     "planned_hard_stop_price": hard_stop_price,
     "planned_hard_stop_type": "stop_market",
     "planned_hard_stop_time_in_force": "gtc",
+    "planned_take_profit_price": take_profit_price,
+    "planned_take_profit_type": "limit",
+    "planned_take_profit_time_in_force": "gtc",
+    "planned_take_profit_quantity": tp_qty,
+    "planned_take_profit_runner_quantity": runner_qty,
     "risk_checks": results,
     "review_alerts": args.review_alerts,
     "selection_method": args.selection_method,
@@ -194,6 +205,8 @@ append_event(
     strike=args.strike, expiration=args.expiration, option_id=args.option_id,
     limit_price=args.ask, bid_at_prep=args.bid,
     planned_hard_stop_price=hard_stop_price,
+    planned_take_profit_price=take_profit_price,
+    planned_take_profit_quantity=tp_qty,
     signal_timestamp=args.signal_timestamp, review_alerts=args.review_alerts,
     selection_method=args.selection_method,
 )
@@ -201,15 +214,28 @@ append_event(
 print(f"PREPARED: {order_id}")
 print("\n--- Notification text ---")
 print(f"SIGNAL: {args.symbol} {args.direction.upper()} ${args.strike} exp {args.expiration}")
-print(f"Limit BUY 1 contract @ ${args.ask:.2f} (${args.ask*100:.2f} total). "
-      f"Bid ${args.bid:.2f}. Planned GTC stop-loss @ ${hard_stop_price:.2f} (-15%).")
+_stop_pct = int(round(HARD_STOP_PCT * 100))
+_tp_pct = int(round(TAKE_PROFIT_PCT * 100))
+print(f"Limit BUY {entry_qty} contract @ ${args.ask:.2f} (${args.ask*100*entry_qty:.2f} total). "
+      f"Bid ${args.bid:.2f}. Planned GTC stop-loss @ ${hard_stop_price:.2f} (-{_stop_pct}%), "
+      f"take-profit @ ${take_profit_price:.2f} (+{_tp_pct}%).")
 print(f"Signal fired {args.signal_timestamp}. Order id {order_id}.")
 print("")
 print("STOP-LOSS -- place this immediately after the entry fills:")
-print(f"  {args.direction.upper()} to SELL / close: 1x {args.symbol} ${args.strike} "
-      f"{args.direction} exp {args.expiration}")
+print(f"  SELL to close: {entry_qty}x {args.symbol} ${args.strike} {args.direction} exp {args.expiration}")
 print(f"  Order type   : stop-market (stop loss)")
-print(f"  Stop (trigger): ${hard_stop_price:.2f}   (entry ask ${args.ask:.2f} minus 15%, rounded to the cent)")
+print(f"  Stop (trigger): ${hard_stop_price:.2f}   (entry ask ${args.ask:.2f} minus {_stop_pct}%, rounded to the cent)")
+print(f"  Time in force: GTC")
+print(f"  Option id    : {args.option_id}")
+print("")
+if runner_qty > 0:
+    print(f"TAKE-PROFIT -- place alongside the stop (sell half, keep {runner_qty} as a runner):")
+    print(f"  SELL to close: {tp_qty}x {args.symbol} ${args.strike} {args.direction} exp {args.expiration}")
+else:
+    print("TAKE-PROFIT -- place alongside the stop (1-lot, so this closes the whole position):")
+    print(f"  SELL to close: {tp_qty}x {args.symbol} ${args.strike} {args.direction} exp {args.expiration}")
+print(f"  Order type   : limit")
+print(f"  Limit price  : ${take_profit_price:.2f}   (entry ask ${args.ask:.2f} plus {_tp_pct}%)")
 print(f"  Time in force: GTC")
 print(f"  Option id    : {args.option_id}")
 sizing = results.get("sizing", {})

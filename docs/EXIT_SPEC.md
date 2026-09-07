@@ -3,30 +3,27 @@
 Single source of truth for **how a position should be closed**. This is the
 document to argue with before we build `exit_manager.py`.
 
-Status: commit `c22641c` (2026-09-07) + the "Conservative" changes agreed
-2026-09-07 (marked ▶ PENDING).
+Status: current through the "risk dials" PR (2026-09-07). §5
+(`exit_manager.py`) is still to build — that is PR 5.
 
 ---
 
 ## 1. What actually happens today
 
-**Exits are not managed by the pipeline.** The only exit artifact the pipeline
-produces is a *planned* stop-loss ticket printed in the proposal notification:
+**Exits are not managed by the pipeline yet** (that is PR 5, `exit_manager.py`).
+As of the "risk dials" PR (2026-09-07), every proposal notification prints two
+*planned* tickets the human places by hand after the entry fills:
 
-| field | value |
-|---|---|
-| type | `stop_market` (stop loss) |
-| trigger | `entry ask − 15%`, rounded to the cent |
-| time in force | GTC |
-| when placed | **by the human, by hand, after the entry fills** |
+| ticket | type | trigger / limit | TIF |
+|---|---|---|---|
+| Stop-loss | `stop_market` | `entry ask − 10%`, rounded to the cent | GTC |
+| Take-profit | `limit` | `entry ask + 30%` | GTC |
 
-`compute_hard_stop_price()` computes the number. Nothing places it, nothing
-watches it, nothing places a take-profit, and no task ever calls a closing
-order. If you do not place the stop yourself, the position has no protection.
-
-▶ **PENDING (Conservative):** planned stop trigger `−15% → −10%`
-(`HARD_STOP_PCT 0.15 → 0.10`), and every proposal also carries a **take-profit
-ticket**: sell **half** the position at **entry + 30%** (limit, GTC).
+`compute_hard_stop_price()` / `compute_take_profit_price()` compute the numbers
+(`HARD_STOP_PCT = 0.10`, `TAKE_PROFIT_PCT = 0.30`). On a ≥2-lot the take-profit
+sells half and keeps a runner; on a 1-lot it closes the whole position. Nothing
+places or watches these until PR 5 — if you do not place the stop yourself, the
+position has no protection.
 
 ---
 
@@ -53,13 +50,14 @@ shape of a managed exit, and the starting point for `exit_manager.py`.
    where all three align: an engulfing candle against the position, wick > 50%
    of the bar range, and close through the 20-EMA against the position.
 
-**Tunable parameters** (`simulate_hybrid_trade_exit` signature):
+**Tunable parameters** (`simulate_hybrid_trade_exit` signature — defaults updated
+2026-09-07):
 
-| param | value | ▶ PENDING (Conservative) |
+| param | default | note |
 |---|---|---|
-| `hard_stop_pct` | 0.15 | **0.10** |
-| `trail_pct_phase1` | 0.06 | unchanged |
-| `tp1_pct` | 0.25 | **0.30** |
+| `hard_stop_pct` | 0.10 | was 0.15 |
+| `trail_pct_phase1` | 0.06 | |
+| `tp1_pct` | 0.30 | was 0.25 |
 | `tp1_fraction` | 0.50 | unchanged |
 | `trail_pct_phase2` | 0.12 | unchanged |
 | `max_time_in_trade_minutes` | 30 | **see §4 — wrong for 2-week holds** |
@@ -158,12 +156,13 @@ the record is visible on GitHub, not just in the task's cloud workspace.
 
 | PR | contents | status |
 |---|---|---|
-| **1** | `docs/ENTRY_SPEC.md` + `docs/EXIT_SPEC.md` | this branch — review |
-| **2** | Risk dials + cutoff: hard stop `0.15→0.10`, loss guardrail `0.60→0.10`, drawdown `0.15→0.08`, `EXECUTION_CUTOFF 20:00→19:00`, take-profit ticket (+30% / half) added to proposals | next |
-| **3** | `vwap_dmi_screener.py` rebuilt — 5-min bars, session-anchored VWAP, warm-up seed (ENTRY_SPEC §2) | after 2 |
-| **4** | Pairs rebuilt — daily cointegration tier writes `pairs_today.json`, intraday 5-min z-score trigger reads it (ENTRY_SPEC §3) | after 2 |
+| **1** | `docs/ENTRY_SPEC.md` + `docs/EXIT_SPEC.md` | ✅ merged (#2) |
+| **2** | Risk dials + cutoff: hard stop `0.15→0.10`, loss guardrail `0.60→0.10`, drawdown `0.15→0.08`, `EXECUTION_CUTOFF 20:00→19:00`, take-profit ticket (+30%) added to proposals | ✅ this PR |
+| **3** | `vwap_dmi_screener.py` rebuilt — 5-min bars, session-anchored VWAP, warm-up seed (ENTRY_SPEC §2) | next |
+| **4** | Pairs rebuilt — daily cointegration tier writes `pairs_today.json`, intraday 5-min z-score trigger reads it (ENTRY_SPEC §3) | after 3 |
 | **5** | `exit_manager.py` + new scheduled task — §5 rules, notify-and-confirm, 5-min cadence, all three strategies | after 3–4 |
 | **6** | Reporting — `RESULTS.md` (win/loss/P&L vs Robinhood realized P&L) committed back to the repo each close | last |
 
-Task-side (Chat, not this repo), in parallel: signal tasks → 15–30 min cadence;
-SMC task fetches 5-min bars; re-pin each task's commit after every merge.
+Task-side (Chat, not this repo), in parallel: signal tasks → **15 min** cadence
+(confirmed 2026-09-07); SMC task fetches 5-min bars; re-pin each task's commit
+after every merge.

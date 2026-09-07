@@ -67,7 +67,7 @@ def summarize_day(date_str: str = None):
 def check_daily_loss_guardrail(
     day_start_buying_power: float,
     realized_pnl_today: float,
-    max_loss_pct: float = 0.60,
+    max_loss_pct: float = 0.10,
 ):
     """
     Returns (halt: bool, loss_pct: float).
@@ -76,10 +76,11 @@ def check_daily_loss_guardrail(
     Existing open positions are not force-closed by this check alone --
     that's a separate, explicit decision.
 
-    NOTE: 0.60 (60% of buying power) is a very wide stop for a small,
-    options-heavy account. Most discretionary day-trading risk rules use
-    2-20%. This is set to your stated number -- flagging it here again
-    so it's visible every time the guardrail runs, not just once in chat.
+    2026-09-07 (Conservative dials, per explicit user request): lowered from
+    0.60 to 0.10 -- once today's realized loss reaches 10% of day-start
+    buying power, no new trades for the rest of the session. The old 0.60
+    was effectively no guardrail at all on a small account (it allowed a
+    ~$100 loss day on ~$168 buying power before halting).
     """
     if day_start_buying_power <= 0:
         return True, 0.0

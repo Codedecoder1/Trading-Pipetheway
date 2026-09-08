@@ -89,7 +89,7 @@ To change the candidate list: edit `pairs_universe.json`, merge a PR, re-pin.
 Every ~30 min, 13:30–20:05 UTC, Mon–Fri. Same STANDING RULE. Prompt:
 
 > 1. `get_option_positions` (nonzero) + `get_option_orders` (all recent) for
->    account 805015518. If no open option positions, stop.
+>    the Agentic account. If no open option positions, stop.
 > 2. Per open position build a dict with the fields in `exit_manager.py`'s
 >    docstring. Derive the booleans from the order history:
 >    - `has_resting_stop` — an open stop-market SELL exists for this option

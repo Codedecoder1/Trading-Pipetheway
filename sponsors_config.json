@@ -1,0 +1,51 @@
+{
+  "foundation": {
+    "name": "Fundación Verano Ardiente",
+    "tagline": "Gracias a nuestros patrocinadores",
+    "logo_path": "foundation_logo.png",
+    "colors": {
+      "primary": "#FF6B35",
+      "secondary": "#004E89",
+      "accent": "#F7931E",
+      "text": "#333333",
+      "background": "#FFFFFF"
+    }
+  },
+  "carousel_settings": {
+    "images_per_carousel": 9,
+    "image_width": 1080,
+    "image_height": 1350,
+    "sponsors_grid": "3x3",
+    "include_cover": true
+  },
+  "sponsors": [
+    {
+      "id": 1,
+      "name": "Patrocinador Principal",
+      "logo_path": "sponsors_logos/example_sponsor.png",
+      "tier": "oro",
+      "website": "https://example.com"
+    },
+    {
+      "id": 2,
+      "name": "Empresa Ejemplo 2",
+      "logo_path": "sponsors_logos/example_sponsor_2.png",
+      "tier": "plata",
+      "website": "https://example2.com"
+    },
+    {
+      "id": 3,
+      "name": "Empresa Ejemplo 3",
+      "logo_path": "sponsors_logos/example_sponsor_3.png",
+      "tier": "bronce",
+      "website": "https://example3.com"
+    }
+  ],
+  "output": {
+    "directory": "output/instagram_carousel",
+    "filename_prefix": "fundacion_carousel",
+    "format": "png",
+    "dpi": 300
+  },
+  "notes": "INSTRUCCIONES: 1) Reemplaza los sponsor de ejemplo con los reales. 2) Asegúrate que los logos existan en sponsors_logos/. 3) Ejecuta generate_sponsor_images.py para generar las imágenes."
+}

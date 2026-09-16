@@ -1,0 +1,170 @@
+================================================================================
+CHECKLIST RÁPIDO - Carrusel de Patrocinadores en Instagram
+Fundación Verano Ardiente
+================================================================================
+
+FASE 1: PREPARACIÓN ⚙️
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+☐ Recopilé todos los logos de patrocinadores (PNG o JPG)
+☐ Logo de la Fundación Verano Ardiente está listo
+☐ Logos están en buena resolución (mínimo 300x300px)
+☐ Nombres de empresas verificados y correctos
+☐ Carpeta "sponsors_logos" está vacía y lista
+
+
+FASE 2: GENERAR IMÁGENES 🎨
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Opción A: USAR TEMPLATE HTML (Recomendado)
+  ☐ Abrí "sponsor_carousel_template.html" en navegador
+  ☐ Complété datos de la fundación
+  ☐ Subí logos de patrocinadores
+  ☐ Clickeé "🚀 Generar Todas las Imágenes"
+  ☐ Descargué las imágenes a mi carpeta Descargas
+
+Opción B: USAR PYTHON (Alternativa)
+  ☐ Edité sponsors_config.json
+  ☐ Coloqué logos en sponsors_logos/
+  ☐ Ejecuté: python generate_sponsor_images.py
+  ☐ Imágenes generadas en output/instagram_carousel/
+
+
+FASE 3: VALIDACIÓN DE IMÁGENES ✅
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+☐ Tengo 1 imagen de portada + N imágenes de patrocinadores
+☐ Total imágenes ≤ 10 (para formato carrusel Instagram)
+☐ Cada imagen es 1080 x 1350 píxeles
+☐ Logos se ven claros y legibles
+☐ Colores contrastan bien (no se ve borroso)
+☐ Probé visualizar en versión mobile
+☐ Archivos están en formato PNG
+
+
+FASE 4: PREPARAR CONTENIDO 📝
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+☐ Redacté el caption (ver CAPTIONS_HASHTAGS.md)
+☐ Seleccioné hashtags (8-15 relevantes)
+☐ Preparé respuestas para comentarios típicos
+☐ Confirmé datos de contacto de la fundación
+☐ Identifiqué handles de Instagram de patrocinadores (@empresa)
+
+
+FASE 5: PUBLICACIÓN EN INSTAGRAM 📱
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+☐ Inicia sesión en Instagram (@veranoardiente o tu cuenta)
+☐ Toca "+" (crear post)
+☐ Selecciona "CARRUSEL" (múltiples imágenes)
+☐ Sube las imágenes EN ORDEN CORRECTO:
+    1. Portada (fundacion_carousel_01.png)
+    2. Patrocinadores (fundacion_carousel_02.png, etc.)
+☐ Reorganiza si es necesario (arrastra)
+☐ Pega el caption preparado
+☐ Revisa que hashtags estén correctos
+☐ Configura:
+    ☐ Desactiva comentarios ofensivos (opcional)
+    ☐ Permite etiquetas de otros (sí)
+☐ Clic en "COMPARTIR"
+☐ Espera a que se suba (10-15 segundos)
+☐ ¡Listo! Post publicado ✨
+
+
+FASE 6: POST-PUBLICACIÓN 📊
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Primeras 24 horas:
+  ☐ Respondo comentarios de patrocinadores
+  ☐ Doy like a comentarios
+  ☐ Comparto en Instagram Stories (repost)
+
+Primer fin de semana:
+  ☐ Etiqueto a patrocinadores en comentarios si no lo hice
+  ☐ Reviso el engagement (likes, comentarios, guardados)
+  ☐ Aviso a patrocinadores que salieron en el post
+  ☐ Pido que compartan (reposten) en sus redes
+
+Primera semana:
+  ☐ Analizo métricas:
+    • Alcance total: _________
+    • Interacciones: _________
+    • Engagement rate: _______%
+  ☐ Si engagement < 2%: Reviso qué pasó
+  ☐ Si engagement > 5%: Repito formato similar
+
+
+HORARIOS RECOMENDADOS 🕐
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Mejor día:    Martes, miércoles, jueves
+Mejor hora:   11 AM - 2 PM (hora local)
+Evitar:       Viernes noche, domingo, madrugada
+
+
+EMOJIS ÚTILES 🎨
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💚 Verde (identidad)
+🙏 Agradecimiento
+🤝 Colaboración
+📧 Email
+✨ Celebración
+🚀 Acción
+💬 Comentar
+❤️ Like
+📱 Social media
+
+
+CONTACTOS IMPORTANTES 📞
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Fundación:
+  📧 Email: ___________________
+  📱 WhatsApp: ________________
+  🌐 Website: __________________
+
+Patrocinadores principales:
+  1. __________ (@handle) - _______
+  2. __________ (@handle) - _______
+  3. __________ (@handle) - _______
+
+
+NOTAS RÁPIDAS 💡
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+→ Si hay ERROR al descargar: Limpia caché del navegador (Ctrl+Shift+Del)
+
+→ Si logo se ve pixelado: Necesita mayor resolución (pedir 300x300px+)
+
+→ Si tiene >81 patrocinadores: Crea 2 carruseles (#parte1 #parte2)
+
+→ Si no tienes logo: El sistema pone un rectángulo gris (pedir logo urgente)
+
+→ Para máximo engagement: Pide a patrocinadores que comenten/compartan
+
+
+ARCHIVOS ÚTILES 📁
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📄 README_MANEJADOR_REDES.md      ← Guía completa (léeme primero!)
+📄 FUNDACION_GUIDE.md              ← Guía técnica detallada
+📝 CAPTIONS_HASHTAGS.md            ← Textos y hashtags listos
+📋 CHECKLIST_RAPIDO.txt            ← Este archivo
+🌐 sponsor_carousel_template.html  ← Herramienta visual (USAR ESTA)
+🐍 generate_sponsor_images.py      ← Script Python (alternativa)
+⚙️  sponsors_config.json            ← Configuración
+📁 sponsors_logos/                 ← Coloca logos aquí
+📁 output/                         ← Imágenes generadas salen aquí
+
+
+================================================================================
+ESTADO ACTUAL: ___________________________________
+ÚLTIMA ACTUALIZACIÓN: _____/_____/______
+RESPONSABLE: _________________________________
+================================================================================
+
+✅ SI COMPLETASTE TODO, ¡ESTÁS LISTO PARA PUBLICAR EN INSTAGRAM! 🚀
+
+Dudas o problemas → Revisa README_MANEJADOR_REDES.md sección "Soporte"
